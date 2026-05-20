@@ -1,0 +1,17 @@
+APP_NAME = "AudiCalPro"
+ORG_NAME = "Kelompok 212"
+
+IEC_FREQUENCIES = [
+    125,
+    250,
+    500,
+    1000,
+    2000,
+    4000,
+    8000
+]
+
+DEFAULT_SAMPLE_RATE = 48000
+DEFAULT_BLOCK_SIZE = 4096
+
+PASS_TOLERANCE_DB = 3.0
