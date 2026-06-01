@@ -7,7 +7,8 @@ class MetricCard(QFrame):
     def __init__(self, title):
         super().__init__()
 
-        self.setFixedHeight(110)
+        self.setFixedHeight(140)
+        self.setMinimumWidth(160)
         self.setStyleSheet("""
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -21,7 +22,8 @@ class MetricCard(QFrame):
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
 
         title_label = QLabel(title)
         title_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
