@@ -26,6 +26,19 @@ class CalibrationDatabase:
         )
         """)
 
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS measurements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            target_frequency INTEGER NOT NULL,
+            target_level REAL NOT NULL,
+            measured_db REAL NOT NULL,
+            adjusted_db REAL NOT NULL,
+            thd REAL NOT NULL,
+            status TEXT NOT NULL
+        )
+        """)
+
         conn.commit()
         conn.close()
 
@@ -63,6 +76,43 @@ class CalibrationDatabase:
         conn.commit()
         conn.close()
 
+    def add_measurement_record(
+        self,
+        target_frequency,
+        target_level,
+        measured_db,
+        adjusted_db,
+        thd,
+        status
+    ):
+        conn = self.connect()
+        cur = conn.cursor()
+
+        cur.execute("""
+        INSERT INTO measurements
+        (
+            timestamp,
+            target_frequency,
+            target_level,
+            measured_db,
+            adjusted_db,
+            thd,
+            status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            target_frequency,
+            target_level,
+            measured_db,
+            adjusted_db,
+            thd,
+            status
+        ))
+
+        conn.commit()
+        conn.close()
+
     def get_all_records(self):
         conn = self.connect()
         cur = conn.cursor()
@@ -89,6 +139,37 @@ class CalibrationDatabase:
         cur = conn.cursor()
 
         cur.execute("DELETE FROM calibration_history")
+
+        conn.commit()
+        conn.close()
+
+    def get_measurements(self):
+        conn = self.connect()
+        cur = conn.cursor()
+
+        cur.execute("""
+        SELECT
+            timestamp,
+            target_frequency,
+            target_level,
+            measured_db,
+            adjusted_db,
+            thd,
+            status
+        FROM measurements
+        ORDER BY id DESC
+        """)
+
+        rows = cur.fetchall()
+        conn.close()
+
+        return rows
+
+    def clear_measurements(self):
+        conn = self.connect()
+        cur = conn.cursor()
+
+        cur.execute("DELETE FROM measurements")
 
         conn.commit()
         conn.close()
