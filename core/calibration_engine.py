@@ -35,9 +35,10 @@ class CalibrationEngine:
         frequency,
         measured_db,
         reference_db,
-        tolerance_db=None
+        tolerance_db=None,
+        gain_correction_db=0.0
     ):
-        correction = reference_db - measured_db
+        correction = gain_correction_db
 
         tolerance = (
             tolerance_db
@@ -55,6 +56,7 @@ class CalibrationEngine:
             "frequency": frequency,
             "measured_db": measured_db,
             "reference_db": reference_db,
+            "gain_correction_db": gain_correction_db,
             "correction_db": correction,
             "status": status
         }
