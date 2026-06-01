@@ -6,7 +6,9 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QLabel,
     QComboBox,
-    QTabWidget
+    QTabWidget,
+    QLineEdit,
+    QMessageBox
 )
 
 from PyQt6.QtCore import QTimer
@@ -17,13 +19,17 @@ from core.signal_analysis import SignalAnalyzer
 from ui.widgets.metric_card import MetricCard
 from ui.widgets.spectrum_widget import SpectrumWidget
 from ui.calibration_page import CalibrationPage
+from ui.report_page import ReportPage
 
 from core.constants import APP_NAME, ORG_NAME
 
 
 class MeasurementPage(QWidget):
-    def __init__(self):
+    def __init__(self, calibration_engine=None, calibration_page=None):
         super().__init__()
+
+        self.calibration_engine = calibration_engine
+        self.calibration_page = calibration_page
 
         self.audio = AudioEngine()
         self.analyzer = SignalAnalyzer()
@@ -40,11 +46,14 @@ class MeasurementPage(QWidget):
 
     def setup_ui(self):
         root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
 
         title = QLabel("Measurement Module")
         title.setStyleSheet("""
-            font-size: 24px;
-            font-weight: bold;
+            font-size: 26px;
+            font-weight: 700;
+            color: #f0f6ff;
         """)
 
         root.addWidget(title)
@@ -69,24 +78,61 @@ class MeasurementPage(QWidget):
         self.freq_card = MetricCard("Frequency")
         self.db_card = MetricCard("Level")
         self.thd_card = MetricCard("THD")
-        self.noise_card = MetricCard("Noise Floor")
-
+        # remove noise floor from measurement display per spec
         metrics.addWidget(self.freq_card)
         metrics.addWidget(self.db_card)
         metrics.addWidget(self.thd_card)
-        metrics.addWidget(self.noise_card)
 
         root.addLayout(metrics)
 
         self.spectrum = SpectrumWidget()
         root.addWidget(self.spectrum)
 
-        self.measure_button = QPushButton("Start Live")
-        self.measure_button.clicked.connect(
-            self.toggle_measurement
-        )
+        # Target inputs
+        target_row = QHBoxLayout()
+        target_row.setSpacing(12)
 
-        root.addWidget(self.measure_button)
+        self.target_freq = QComboBox()
+        self.target_freq.addItems([
+            "125",
+            "250",
+            "500",
+            "1000",
+            "2000",
+            "4000",
+            "8000"
+        ])
+
+        self.target_level = QLineEdit()
+        self.target_level.setPlaceholderText("Target Level dB")
+        self.target_level.setFixedWidth(120)
+
+        target_row.addWidget(QLabel("Target Frequency"))
+        target_row.addWidget(self.target_freq)
+        target_row.addWidget(QLabel("Target Level dB"))
+        target_row.addWidget(self.target_level)
+
+        root.addLayout(target_row)
+
+        self.pass_fail_label = QLabel("Status: --")
+        self.pass_fail_label.setStyleSheet("font-size:12px; color:#cde6ff;")
+        root.addWidget(self.pass_fail_label)
+
+        button_row = QHBoxLayout()
+
+        self.measure_button = QPushButton("Start Live")
+        self.measure_button.setObjectName("primary")
+        self.measure_button.clicked.connect(self.toggle_measurement)
+
+        self.save_button = QPushButton("Save Measurement")
+        self.save_button.setObjectName("primary")
+        self.save_button.clicked.connect(self.save_measurement)
+
+        button_row.addWidget(self.measure_button)
+        button_row.addWidget(self.save_button)
+
+        root.addLayout(button_row)
+
 
     def load_devices(self):
         self.device_combo.clear()
@@ -114,6 +160,9 @@ class MeasurementPage(QWidget):
             self.is_measuring = False
             self.measure_button.setText("Start Live")
 
+            if self.calibration_page is not None and self.current_result is not None:
+                self.calibration_page.set_measured_value(self.current_result['db'])
+
     def live_measure(self):
         try:
             signal = self.audio.capture()
@@ -135,10 +184,6 @@ class MeasurementPage(QWidget):
 
             self.thd_card.set_value(
                 f"{result['thd']:.2f}%"
-            )
-
-            self.noise_card.set_value(
-                f"{result['noise']:.2f}"
             )
 
             self.spectrum.update_plot(
@@ -164,8 +209,57 @@ class MeasurementPage(QWidget):
                     )
                 )
             ),
-            "measured_db": self.current_result["db"]
+            "measured_db": self.current_result["db"],
+            "thd": self.current_result["thd"]
         }
+
+    def save_measurement(self):
+        from database.db import CalibrationDatabase
+
+        measurement = self.get_current_measurement()
+
+        if measurement is None:
+            QMessageBox.warning(self, "No Data", "No measurement available to save.")
+            return
+
+        try:
+            target_freq = int(self.target_freq.currentText())
+            target_level = float(self.target_level.text())
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "Enter a valid numeric target level.")
+            return
+
+        measured_db = measurement["measured_db"]
+        thd = measurement.get("thd", 0.0)
+
+        # apply last calibration offset if available
+        offset = 0.0
+
+        if self.calibration_engine is not None:
+            profile = self.calibration_engine.get_profile()
+            offset = float(profile.get(str(target_freq), 0.0))
+
+        adjusted_db = measured_db + offset
+
+        adjustment = self.calibration_engine.PASS_ADJUSTMENT_DB if self.calibration_engine else 3.0
+
+        status = "PASS" if abs(adjusted_db - target_level) <= adjustment else "FAIL"
+
+        if self.calibration_page is not None:
+            self.calibration_page.set_measured_value(measured_db)
+
+        db = CalibrationDatabase()
+        db.add_measurement_record(
+            target_freq,
+            target_level,
+            measured_db,
+            adjusted_db,
+            thd,
+            status
+        )
+
+        self.pass_fail_label.setText(f"Status: {status}")
+        QMessageBox.information(self, "Saved", "Measurement saved to database.")
 
 
 class MainWindow(QMainWindow):
@@ -183,17 +277,28 @@ class MainWindow(QMainWindow):
     def setup_ui(self):
         tabs = QTabWidget()
 
-        self.measurement_page = MeasurementPage()
-
+        # create calibration first (leftmost), then measurement, then report
         self.calibration_page = CalibrationPage()
-        tabs.addTab(
-            self.measurement_page,
-            "Measurement"
+
+        self.measurement_page = MeasurementPage(
+            calibration_engine=self.calibration_page.engine,
+            calibration_page=self.calibration_page
         )
 
-        tabs.addTab(
-            self.calibration_page,
-            "Calibration"
-        )
+        tabs.addTab(self.calibration_page, "Calibration")
+        tabs.addTab(self.measurement_page, "Measurement")
+
+        self.report_page = ReportPage()
+        tabs.addTab(self.report_page, "Report")
+
+        # global styles for buttons and inputs to improve visibility
+        self.setStyleSheet('''
+            QPushButton { background: #14232b; color: #eaf6ff; padding:8px 12px; border-radius:6px; }
+            QPushButton#primary { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #2b90ff, stop:1 #1b6fff); color: white; font-weight:600 }
+            QPushButton#secondary { background: #2b3944; color:#dbeaf7 }
+            QComboBox, QLineEdit { background: #081421; color:#eaf6ff; padding:6px; border-radius:6px }
+        ''')
 
         self.setCentralWidget(tabs)
+
+        

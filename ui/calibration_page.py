@@ -13,6 +13,8 @@ from PyQt6.QtWidgets import (
 )
 
 from core.calibration_engine import CalibrationEngine
+from ui.widgets.spectrum_widget import SpectrumWidget
+from PyQt6.QtWidgets import QHeaderView
 
 
 class CalibrationPage(QWidget):
@@ -20,21 +22,35 @@ class CalibrationPage(QWidget):
         super().__init__()
 
         self.engine = CalibrationEngine()
+        self.auto_fill_measured = True
 
         self.setup_ui()
 
     def setup_ui(self):
         root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(12)
 
         title = QLabel("Calibration Module")
         title.setStyleSheet("""
-            font-size: 24px;
-            font-weight: bold;
+            font-size: 26px;
+            font-weight: 700;
+            color: #f0f6ff;
         """)
         root.addWidget(title)
 
         input_group = QGroupBox("Calibration Input")
         input_layout = QVBoxLayout()
+
+        input_group.setLayout(input_layout)
+        input_group.setStyleSheet('''
+            QGroupBox { padding: 10px; border: 1px solid rgba(255,255,255,0.06); border-radius:8px; }
+            QLabel { color: #d0d7de }
+            QLineEdit { background: #0f1720; color: #e6eef8; padding:6px; border-radius:6px }
+            QComboBox { background: #0f1720; color: #e6eef8; padding:4px; border-radius:6px }
+            QPushButton { padding:6px 10px; border-radius:6px }
+            QPushButton#primary { background-color: #2b90ff; color: white }
+        ''')
 
         # Frequency
         freq_row = QHBoxLayout()
@@ -50,6 +66,9 @@ class CalibrationPage(QWidget):
             "8000"
         ])
 
+        # default to 1 kHz
+        self.frequency_combo.setCurrentText("1000")
+
         freq_row.addWidget(QLabel("Frequency (Hz)"))
         freq_row.addWidget(self.frequency_combo)
 
@@ -60,6 +79,7 @@ class CalibrationPage(QWidget):
 
         self.measured_input = QLineEdit()
         self.measured_input.setPlaceholderText("Measured dB")
+        self.measured_input.textChanged.connect(self.on_manual_measured_edit)
 
         measured_row.addWidget(QLabel("Measured dB"))
         measured_row.addWidget(self.measured_input)
@@ -71,43 +91,48 @@ class CalibrationPage(QWidget):
 
         self.reference_input = QLineEdit()
         self.reference_input.setPlaceholderText("Reference dB")
+        self.reference_input.textChanged.connect(self.on_reference_changed)
 
         reference_row.addWidget(QLabel("Reference dB"))
         reference_row.addWidget(self.reference_input)
 
         input_layout.addLayout(reference_row)
 
-        # Tolerance
-        tolerance_row = QHBoxLayout()
+        # Adjustment
+        adjustment_row = QHBoxLayout()
 
-        self.tolerance_input = QLineEdit()
-        self.tolerance_input.setText("3.0")
-        self.tolerance_input.setPlaceholderText("Tolerance dB")
+        self.adjustment_input = QLineEdit()
+        self.adjustment_input.setText("3.0")
+        self.adjustment_input.setPlaceholderText("Adjustment dB")
 
-        tolerance_row.addWidget(QLabel("Tolerance (± dB)"))
-        tolerance_row.addWidget(self.tolerance_input)
+        adjustment_row.addWidget(QLabel("Adjustment (± dB)"))
+        adjustment_row.addWidget(self.adjustment_input)
 
-        input_layout.addLayout(tolerance_row)
+        input_layout.addLayout(adjustment_row)
 
         # Buttons
         button_row = QHBoxLayout()
 
         self.calculate_button = QPushButton("Calculate Calibration")
+        self.calculate_button.setObjectName("primary")
         self.calculate_button.clicked.connect(
             self.calculate_calibration
         )
 
         self.save_button = QPushButton("Save Profile")
+        self.save_button.setObjectName("primary")
         self.save_button.clicked.connect(
             self.save_profile
         )
 
         self.clear_button = QPushButton("Clear Session")
+        self.clear_button.setObjectName("secondary")
         self.clear_button.clicked.connect(
             self.clear_session
         )
 
         self.history_button = QPushButton("Load History")
+        self.history_button.setObjectName("secondary")
         self.history_button.clicked.connect(
             self.load_history
         )
@@ -134,6 +159,10 @@ class CalibrationPage(QWidget):
 
         root.addWidget(self.summary_label)
 
+        self.gain_preview_label = QLabel("Gain Correction: -- dB")
+        self.gain_preview_label.setStyleSheet("font-size: 14px; color: #a8c9ff;")
+        root.addWidget(self.gain_preview_label)
+
         # Table
         self.table = QTableWidget()
         self.table.setColumnCount(5)
@@ -147,6 +176,26 @@ class CalibrationPage(QWidget):
         ])
 
         root.addWidget(self.table)
+
+        # small status labels
+        status_row = QHBoxLayout()
+        self.last_measured_label = QLabel("Last Measured: -- dB")
+        self.cal_level_label = QLabel("Calibration Level: -- dB")
+
+        status_row.addWidget(self.last_measured_label)
+        status_row.addWidget(self.cal_level_label)
+
+        root.addLayout(status_row)
+
+        # table header style
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setStyleSheet('''
+            QTableWidget { background: #0b1220; color: #e6eef8; border: none }
+            QHeaderView::section { background: #121826; color:#d7e1ff; padding:8px; font-weight:700 }
+            QTableWidget::item { padding:6px }
+        ''')
 
     def calculate_calibration(self):
         try:
@@ -162,19 +211,23 @@ class CalibrationPage(QWidget):
                 self.reference_input.text()
             )
 
-            tolerance = float(
-                self.tolerance_input.text()
+            adjustment = float(
+                self.adjustment_input.text()
             )
 
             result = self.engine.calculate_correction(
                 frequency,
                 measured,
                 reference,
-                tolerance
+                adjustment
             )
 
             self.add_result_to_table(result)
             self.update_summary()
+
+            # update small status labels
+            self.last_measured_label.setText(f"Last Measured: {result['measured_db']:.2f} dB")
+            self.cal_level_label.setText(f"Calibration Level: {result['reference_db']:.2f} dB")
 
             self.measured_input.clear()
             self.reference_input.clear()
@@ -185,6 +238,34 @@ class CalibrationPage(QWidget):
                 "Input Error",
                 "Enter valid numeric values."
             )
+
+    def on_manual_measured_edit(self, text):
+        if self.measured_input.hasFocus():
+            self.auto_fill_measured = False
+        self.update_correction_preview()
+
+    def on_reference_changed(self, text):
+        self.update_correction_preview()
+
+    def set_measured_value(self, value):
+        if not self.auto_fill_measured:
+            return
+
+        self.measured_input.blockSignals(True)
+        self.measured_input.setText(f"{value:.2f}")
+        self.measured_input.blockSignals(False)
+        self.update_correction_preview()
+
+    def update_correction_preview(self):
+        try:
+            measured = float(self.measured_input.text())
+            reference = float(self.reference_input.text())
+            correction = reference - measured
+            self.gain_preview_label.setText(
+                f"Gain Correction: {correction:.2f} dB"
+            )
+        except ValueError:
+            self.gain_preview_label.setText("Gain Correction: -- dB")
 
     def add_result_to_table(self, result):
         row = self.table.rowCount()
@@ -294,3 +375,9 @@ class CalibrationPage(QWidget):
                 4,
                 QTableWidgetItem(status)
             )
+
+        # update small labels with most recent if available
+        if rows:
+            latest = rows[0]
+            self.last_measured_label.setText(f"Last Measured: {latest[2]:.2f} dB")
+            self.cal_level_label.setText(f"Calibration Level: {latest[3]:.2f} dB")
