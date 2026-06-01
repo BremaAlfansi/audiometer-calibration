@@ -23,6 +23,7 @@ class CalibrationPage(QWidget):
 
         self.engine = CalibrationEngine()
         self.auto_fill_measured = True
+        self.auto_gain_correction = True
 
         self.setup_ui()
 
@@ -97,6 +98,20 @@ class CalibrationPage(QWidget):
         reference_row.addWidget(self.reference_input)
 
         input_layout.addLayout(reference_row)
+
+        # Gain correction
+        gain_row = QHBoxLayout()
+
+        self.gain_correction_input = QLineEdit()
+        self.gain_correction_input.setText("0.0")
+        self.gain_correction_input.setPlaceholderText("Gain correction dB")
+        self.gain_correction_input.textChanged.connect(self.update_correction_preview)
+        self.gain_correction_input.textEdited.connect(self.on_gain_correction_edited)
+
+        gain_row.addWidget(QLabel("Gain Correction (dB)"))
+        gain_row.addWidget(self.gain_correction_input)
+
+        input_layout.addLayout(gain_row)
 
         # Tolerance
         tolerance_row = QHBoxLayout()
@@ -211,6 +226,10 @@ class CalibrationPage(QWidget):
                 self.reference_input.text()
             )
 
+            gain_correction = float(
+                self.gain_correction_input.text() or "0"
+            )
+
             tolerance = float(
                 self.tolerance_input.text()
             )
@@ -219,7 +238,8 @@ class CalibrationPage(QWidget):
                 frequency,
                 measured,
                 reference,
-                tolerance
+                tolerance,
+                gain_correction_db=gain_correction
             )
 
             self.add_result_to_table(result)
@@ -242,9 +262,18 @@ class CalibrationPage(QWidget):
     def on_manual_measured_edit(self, text):
         if self.measured_input.hasFocus():
             self.auto_fill_measured = False
+        self.maybe_auto_update_gain_correction()
         self.update_correction_preview()
 
     def on_reference_changed(self, text):
+        self.maybe_auto_update_gain_correction()
+        self.update_correction_preview()
+
+    def on_gain_correction_edited(self, text):
+        if self.gain_correction_input.hasFocus():
+            self.auto_gain_correction = (text.strip() == "")
+            if self.auto_gain_correction:
+                self.maybe_auto_update_gain_correction()
         self.update_correction_preview()
 
     def set_measured_value(self, value):
@@ -254,15 +283,29 @@ class CalibrationPage(QWidget):
         self.measured_input.blockSignals(True)
         self.measured_input.setText(f"{value:.2f}")
         self.measured_input.blockSignals(False)
+        self.maybe_auto_update_gain_correction()
         self.update_correction_preview()
 
-    def update_correction_preview(self):
+    def maybe_auto_update_gain_correction(self):
+        if not self.auto_gain_correction:
+            return
+
         try:
             measured = float(self.measured_input.text())
             reference = float(self.reference_input.text())
             correction = reference - measured
+
+            self.gain_correction_input.blockSignals(True)
+            self.gain_correction_input.setText(f"{correction:.2f}")
+            self.gain_correction_input.blockSignals(False)
+        except ValueError:
+            pass
+
+    def update_correction_preview(self):
+        try:
+            gain_adjust = float(self.gain_correction_input.text() or "0")
             self.gain_preview_label.setText(
-                f"Gain Correction: {correction:.2f} dB"
+                f"Gain Correction: {gain_adjust:+.2f} dB"
             )
         except ValueError:
             self.gain_preview_label.setText("Gain Correction: -- dB")
