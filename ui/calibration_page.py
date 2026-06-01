@@ -98,17 +98,17 @@ class CalibrationPage(QWidget):
 
         input_layout.addLayout(reference_row)
 
-        # Adjustment
-        adjustment_row = QHBoxLayout()
+        # Tolerance
+        tolerance_row = QHBoxLayout()
 
-        self.adjustment_input = QLineEdit()
-        self.adjustment_input.setText("3.0")
-        self.adjustment_input.setPlaceholderText("Adjustment dB")
+        self.tolerance_input = QLineEdit()
+        self.tolerance_input.setText("3.0")
+        self.tolerance_input.setPlaceholderText("Tolerance dB")
 
-        adjustment_row.addWidget(QLabel("Adjustment (± dB)"))
-        adjustment_row.addWidget(self.adjustment_input)
+        tolerance_row.addWidget(QLabel("Tolerance (± dB)"))
+        tolerance_row.addWidget(self.tolerance_input)
 
-        input_layout.addLayout(adjustment_row)
+        input_layout.addLayout(tolerance_row)
 
         # Buttons
         button_row = QHBoxLayout()
@@ -211,15 +211,15 @@ class CalibrationPage(QWidget):
                 self.reference_input.text()
             )
 
-            adjustment = float(
-                self.adjustment_input.text()
+            tolerance = float(
+                self.tolerance_input.text()
             )
 
             result = self.engine.calculate_correction(
                 frequency,
                 measured,
                 reference,
-                adjustment
+                tolerance
             )
 
             self.add_result_to_table(result)

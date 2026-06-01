@@ -15,7 +15,7 @@ class CalibrationEngine:
         8000
     ]
 
-    PASS_ADJUSTMENT_DB = 3.0
+    PASS_TOLERANCE_DB = 3.0
 
     def __init__(self):
         self.profile_path = "config/calibration_profile.json"
@@ -35,19 +35,19 @@ class CalibrationEngine:
         frequency,
         measured_db,
         reference_db,
-        adjustment_db=None
+        tolerance_db=None
     ):
         correction = reference_db - measured_db
 
-        adjustment = (
-            adjustment_db
-            if adjustment_db is not None
-            else self.PASS_ADJUSTMENT_DB
+        tolerance = (
+            tolerance_db
+            if tolerance_db is not None
+            else self.PASS_TOLERANCE_DB
         )
 
         status = (
             "PASS"
-            if abs(correction) <= adjustment
+            if abs(correction) <= tolerance
             else "FAIL"
         )
 
