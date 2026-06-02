@@ -2,6 +2,7 @@ import json
 import os
 
 from database.db import CalibrationDatabase
+from core.constants import PASS_TOLERANCE_DB, PASS_THD_PERCENT
 
 
 class CalibrationEngine:
@@ -15,7 +16,8 @@ class CalibrationEngine:
         8000
     ]
 
-    PASS_TOLERANCE_DB = 3.0
+    PASS_TOLERANCE_DB = PASS_TOLERANCE_DB
+    PASS_THD_PERCENT = PASS_THD_PERCENT
 
     def __init__(self):
         self.profile_path = "config/calibration_profile.json"
@@ -39,6 +41,7 @@ class CalibrationEngine:
         gain_correction_db=0.0
     ):
         correction = gain_correction_db
+        adjusted_db = measured_db + correction
 
         tolerance = (
             tolerance_db
@@ -48,7 +51,7 @@ class CalibrationEngine:
 
         status = (
             "PASS"
-            if abs(correction) <= tolerance
+            if abs(adjusted_db - reference_db) <= tolerance
             else "FAIL"
         )
 
@@ -57,6 +60,7 @@ class CalibrationEngine:
             "measured_db": measured_db,
             "reference_db": reference_db,
             "gain_correction_db": gain_correction_db,
+            "adjusted_db": adjusted_db,
             "correction_db": correction,
             "status": status
         }

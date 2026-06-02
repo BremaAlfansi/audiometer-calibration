@@ -242,8 +242,11 @@ class MeasurementPage(QWidget):
         adjusted_db = measured_db + offset
 
         tolerance = self.calibration_engine.PASS_TOLERANCE_DB if self.calibration_engine else 3.0
+        thd_tolerance = self.calibration_engine.PASS_THD_PERCENT if self.calibration_engine else 3.0
 
-        status = "PASS" if abs(adjusted_db - target_level) <= tolerance else "FAIL"
+        level_pass = abs(adjusted_db - target_level) <= tolerance
+        thd_pass = thd <= thd_tolerance
+        status = "PASS" if level_pass and thd_pass else "FAIL"
 
         if self.calibration_page is not None:
             self.calibration_page.set_measured_value(measured_db)
