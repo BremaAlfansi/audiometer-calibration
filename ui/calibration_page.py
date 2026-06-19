@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QGroupBox
 )
 
+from PyQt6.QtGui import QColor
 from core.calibration_engine import CalibrationEngine
 from ui.widgets.spectrum_widget import SpectrumWidget
 from PyQt6.QtWidgets import QHeaderView
@@ -112,18 +113,6 @@ class CalibrationPage(QWidget):
         gain_row.addWidget(self.gain_correction_input)
 
         input_layout.addLayout(gain_row)
-
-        # Tolerance
-        tolerance_row = QHBoxLayout()
-
-        self.tolerance_input = QLineEdit()
-        self.tolerance_input.setText("3.0")
-        self.tolerance_input.setPlaceholderText("Tolerance dB")
-
-        tolerance_row.addWidget(QLabel("Tolerance (± dB)"))
-        tolerance_row.addWidget(self.tolerance_input)
-
-        input_layout.addLayout(tolerance_row)
 
         # Buttons
         button_row = QHBoxLayout()
@@ -230,15 +219,10 @@ class CalibrationPage(QWidget):
                 self.gain_correction_input.text() or "0"
             )
 
-            tolerance = float(
-                self.tolerance_input.text()
-            )
-
             result = self.engine.calculate_correction(
                 frequency,
                 measured,
                 reference,
-                tolerance,
                 gain_correction_db=gain_correction
             )
 
@@ -314,6 +298,10 @@ class CalibrationPage(QWidget):
         row = self.table.rowCount()
         self.table.insertRow(row)
 
+        status = result["status"]
+        status_color = "#2ecc71" if status == "PASS" else "#e74c3c"
+        status_text_color = "white"
+
         self.table.setItem(
             row,
             0,
@@ -344,20 +332,24 @@ class CalibrationPage(QWidget):
             )
         )
 
-        self.table.setItem(
-            row,
-            4,
-            QTableWidgetItem(result["status"])
-        )
+        status_item = QTableWidgetItem(status)
+        status_item.setBackground(status_color)
+        status_item.setForeground(status_text_color)
+        self.table.setItem(row, 4, status_item)
 
     def update_summary(self):
         summary = self.engine.get_summary()
+        overall = summary['overall']
+        overall_color = "#2ecc71" if overall == "PASS" else "#e74c3c"
 
         self.summary_label.setText(
             f"Total: {summary['total']} | "
             f"PASS: {summary['passed']} | "
             f"FAIL: {summary['failed']} | "
-            f"Overall: {summary['overall']}"
+            f"Overall: {overall}"
+        )
+        self.summary_label.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {overall_color};"
         )
 
     def save_profile(self):
@@ -413,11 +405,11 @@ class CalibrationPage(QWidget):
                 QTableWidgetItem(f"{correction:.2f}")
             )
 
-            self.table.setItem(
-                row,
-                4,
-                QTableWidgetItem(status)
-            )
+            status_color = "#2ecc71" if status == "PASS" else "#e74c3c"
+            status_item = QTableWidgetItem(status)
+            status_item.setBackground(status_color)
+            status_item.setForeground("white")
+            self.table.setItem(row, 4, status_item)
 
         # update small labels with most recent if available
         if rows:

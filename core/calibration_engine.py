@@ -37,21 +37,14 @@ class CalibrationEngine:
         frequency,
         measured_db,
         reference_db,
-        tolerance_db=None,
         gain_correction_db=0.0
     ):
         correction = gain_correction_db
         adjusted_db = measured_db + correction
 
-        tolerance = (
-            tolerance_db
-            if tolerance_db is not None
-            else self.PASS_TOLERANCE_DB
-        )
-
         status = (
             "PASS"
-            if abs(adjusted_db - reference_db) <= tolerance
+            if adjusted_db == reference_db
             else "FAIL"
         )
 

@@ -240,13 +240,12 @@ class MeasurementPage(QWidget):
             offset = float(profile.get(str(target_freq), 0.0))
 
         adjusted_db = measured_db + offset
-
-        tolerance = self.calibration_engine.PASS_TOLERANCE_DB if self.calibration_engine else 3.0
         thd_tolerance = self.calibration_engine.PASS_THD_PERCENT if self.calibration_engine else 3.0
 
-        level_pass = abs(adjusted_db - target_level) <= tolerance
+        level_pass = adjusted_db == target_level
         thd_pass = thd <= thd_tolerance
         status = "PASS" if level_pass and thd_pass else "FAIL"
+        status_color = "#2ecc71" if status == "PASS" else "#e74c3c"
 
         if self.calibration_page is not None:
             self.calibration_page.set_measured_value(measured_db)
@@ -261,7 +260,9 @@ class MeasurementPage(QWidget):
             status
         )
 
+        status_color = "#2ecc71" if status == "PASS" else "#e74c3c"
         self.pass_fail_label.setText(f"Status: {status}")
+        self.pass_fail_label.setStyleSheet(f"font-size:12px; color:{status_color}; font-weight:bold;")
         QMessageBox.information(self, "Saved", "Measurement saved to database.")
 
 
