@@ -1,2 +1,2 @@
 # audiometer-calibration
-Software to calibrate and measure audio.
+Software to calibrate audiometer
