@@ -1,40 +1,40 @@
 from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+
+from ui import style
+from ui.style import READING_BG, READING_FG, TEXT_MUTED, px, s
 
 
 class MetricCard(QFrame):
+    """Compact read-only readout: caption above, value below."""
+
     def __init__(self, title):
         super().__init__()
 
-        self.setFixedHeight(140)
-        self.setMinimumWidth(160)
-        self.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #232323, stop:1 #1b2430);
-                color: #e6e6e6;
-                border: 1px solid rgba(255,255,255,0.06);
-                border-radius: 10px;
-                padding: 8px;
-            }
-            QLabel { color: #d7d7d7 }
+        self.setMinimumWidth(s(80))
+        self.setStyleSheet(f"""
+            QFrame {{
+                background: {READING_BG};
+                border: 1px dashed #3a8a83;
+                border-radius: 8px;
+            }}
+            QLabel {{ border: none; background: transparent; }}
         """)
 
+        compact = style.COMPACT
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(6 if compact else 10, 6, 4 if compact else 10, 8)
+        layout.setSpacing(2)
 
         title_label = QLabel(title)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        title_label.setStyleSheet("font-size: 12px; color: #aeb6c1;")
+        title_label.setStyleSheet(f"font-size: {px(12 if compact else 13)}; color: {TEXT_MUTED};")
 
         self.value_label = QLabel("--")
-        self.value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = QFont("Segoe UI", 26)
-        font.setWeight(QFont.Weight.DemiBold)
-        self.value_label.setFont(font)
-        self.value_label.setStyleSheet("color: #ffffff;")
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.value_label.setStyleSheet(
+            f"font-size: {px(19)}; font-weight: 700; color: {READING_FG};"
+            " font-family: Consolas, monospace;"
+        )
         self.value_label.setTextFormat(Qt.TextFormat.PlainText)
 
         layout.addWidget(title_label)

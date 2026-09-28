@@ -1,426 +1,323 @@
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QPushButton,
     QComboBox,
     QLineEdit,
+    QCheckBox,
     QTableWidget,
-    QTableWidgetItem,
     QMessageBox,
-    QGroupBox
+    QGroupBox,
+    QHeaderView,
+    QAbstractItemView
 )
 
-from core.calibration_engine import CalibrationEngine
-from ui.widgets.spectrum_widget import SpectrumWidget
-from PyQt6.QtWidgets import QHeaderView
+from core.calibration_engine import CalibrationEngine, gain_correction
+from core.constants import IEC_FREQUENCIES, LEVEL_RESOLUTION_DB
+from ui.i18n import tr
+from ui.style import (
+    banner, legend_label, status_item, NumericItem, db_validator, setup_table, info_icon, section_title,
+    fit_table_height, two_line_header
+)
 
 
 class CalibrationPage(QWidget):
-    def __init__(self):
+    calibration_changed = pyqtSignal()
+
+    def __init__(self, engine: CalibrationEngine, live_panel):
         super().__init__()
 
-        self.engine = CalibrationEngine()
-        self.auto_fill_measured = True
-        self.auto_gain_correction = True
+        self.engine = engine
+        self.live = live_panel
 
         self.setup_ui()
+        self.refresh_table()
+
+        self.live.reading_updated.connect(self.on_reading)
+        self.live.live_state_changed.connect(lambda _: self.update_preview())
 
     def setup_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
+        root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
 
-        title = QLabel("Calibration Module")
-        title.setStyleSheet("""
-            font-size: 26px;
-            font-weight: 700;
-            color: #f0f6ff;
-        """)
-        root.addWidget(title)
+        header = QHBoxLayout()
+        title = QLabel(tr("Calibration"))
+        title.setObjectName("pageTitle")
+        header.addWidget(title)
+        header.addWidget(info_icon(tr(
+            "For each frequency: present a tone on the audiometer, read the true level on the "
+            "reference sound level meter, type it as Reference, then press Calibrate."
+        )))
+        header.addStretch(1)
+        header.addWidget(legend_label())
+        root.addLayout(header)
 
-        input_group = QGroupBox("Calibration Input")
-        input_layout = QVBoxLayout()
-
-        input_group.setLayout(input_layout)
-        input_group.setStyleSheet('''
-            QGroupBox { padding: 10px; border: 1px solid rgba(255,255,255,0.06); border-radius:8px; }
-            QLabel { color: #d0d7de }
-            QLineEdit { background: #0f1720; color: #e6eef8; padding:6px; border-radius:6px }
-            QComboBox { background: #0f1720; color: #e6eef8; padding:4px; border-radius:6px }
-            QPushButton { padding:6px 10px; border-radius:6px }
-            QPushButton#primary { background-color: #2b90ff; color: white }
-        ''')
-
-        # Frequency
-        freq_row = QHBoxLayout()
+        # Input form: Frequency | Reference | Measured | Gain correction, left to right.
+        group = QGroupBox(tr("Calibrate one frequency"))
+        grid = QGridLayout(group)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(8)
 
         self.frequency_combo = QComboBox()
-        self.frequency_combo.addItems([
-            "125",
-            "250",
-            "500",
-            "1000",
-            "2000",
-            "4000",
-            "8000"
-        ])
-
-        # default to 1 kHz
-        self.frequency_combo.setCurrentText("1000")
-
-        freq_row.addWidget(QLabel("Frequency (Hz)"))
-        freq_row.addWidget(self.frequency_combo)
-
-        input_layout.addLayout(freq_row)
-
-        # Measured
-        measured_row = QHBoxLayout()
-
-        self.measured_input = QLineEdit()
-        self.measured_input.setPlaceholderText("Measured dB")
-        self.measured_input.textChanged.connect(self.on_manual_measured_edit)
-
-        measured_row.addWidget(QLabel("Measured dB"))
-        measured_row.addWidget(self.measured_input)
-
-        input_layout.addLayout(measured_row)
-
-        # Reference
-        reference_row = QHBoxLayout()
+        for f in IEC_FREQUENCIES:
+            self.frequency_combo.addItem(f"{f} Hz", f)
+        self.frequency_combo.setCurrentIndex(IEC_FREQUENCIES.index(1000))
+        self.frequency_combo.currentIndexChanged.connect(self.update_preview)
 
         self.reference_input = QLineEdit()
-        self.reference_input.setPlaceholderText("Reference dB")
-        self.reference_input.textChanged.connect(self.on_reference_changed)
+        self.reference_input.setPlaceholderText(tr("from reference meter"))
+        self.reference_input.setValidator(db_validator())
+        self.reference_input.textChanged.connect(self.update_preview)
 
-        reference_row.addWidget(QLabel("Reference dB"))
-        reference_row.addWidget(self.reference_input)
+        self.measured_input = QLineEdit()
+        self.measured_input.setReadOnly(True)
+        self.measured_input.setPlaceholderText(tr("start live signal"))
+        self.measured_input.setValidator(db_validator())
+        self.measured_input.textChanged.connect(self.update_preview)
 
-        input_layout.addLayout(reference_row)
+        self.manual_check = QCheckBox(tr("Enter manually"))
+        self.manual_check.toggled.connect(self.on_manual_toggled)
 
-        # Gain correction
-        gain_row = QHBoxLayout()
+        self.correction_value = QLabel("--")
+        self.correction_value.setObjectName("reading")
 
-        self.gain_correction_input = QLineEdit()
-        self.gain_correction_input.setText("0.0")
-        self.gain_correction_input.setPlaceholderText("Gain correction dB")
-        self.gain_correction_input.textChanged.connect(self.update_correction_preview)
-        self.gain_correction_input.textEdited.connect(self.on_gain_correction_edited)
+        correction_header = QHBoxLayout()
+        correction_header.addWidget(QLabel(tr("Gain correction (dB)")))
+        correction_header.addWidget(info_icon(tr(
+            "Gain correction = Reference − Measured.\n"
+            "It is added to every later reading at this frequency:\n"
+            "Corrected = Measured + Gain correction.\n"
+            "PASS when Corrected equals Reference ({res} dB resolution)."
+        ).format(res=LEVEL_RESOLUTION_DB)))
+        correction_header.addStretch(1)
 
-        gain_row.addWidget(QLabel("Gain Correction (dB)"))
-        gain_row.addWidget(self.gain_correction_input)
+        grid.addWidget(QLabel(tr("Frequency")), 0, 0)
+        grid.addWidget(QLabel(tr("Reference (dB)")), 0, 1)
+        grid.addWidget(QLabel(tr("Measured (dB)")), 0, 2)
+        grid.addLayout(correction_header, 0, 3)
 
-        input_layout.addLayout(gain_row)
+        grid.addWidget(self.frequency_combo, 1, 0)
+        grid.addWidget(self.reference_input, 1, 1)
+        grid.addWidget(self.measured_input, 1, 2)
+        grid.addWidget(self.correction_value, 1, 3)
 
-        # Tolerance
-        tolerance_row = QHBoxLayout()
+        self.calibrate_button = QPushButton(tr("Calibrate"))
+        self.calibrate_button.setObjectName("primary")
+        self.calibrate_button.clicked.connect(self.calibrate)
+        grid.addWidget(self.calibrate_button, 2, 0)
+        grid.addWidget(self.manual_check, 2, 2)
 
-        self.tolerance_input = QLineEdit()
-        self.tolerance_input.setText("3.0")
-        self.tolerance_input.setPlaceholderText("Tolerance dB")
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 1)
+        grid.setColumnStretch(3, 1)
+        root.addWidget(group)
 
-        tolerance_row.addWidget(QLabel("Tolerance (± dB)"))
-        tolerance_row.addWidget(self.tolerance_input)
+        self.form_banner = QLabel()
+        self.form_banner.setVisible(False)
+        root.addWidget(self.form_banner)
 
-        input_layout.addLayout(tolerance_row)
+        # Calibration table: one row per frequency, including missing ones.
+        root.addWidget(section_title(tr("Calibration points")))
 
-        # Buttons
-        button_row = QHBoxLayout()
+        self.coverage_banner = QLabel()
+        self.coverage_banner.setVisible(False)
+        root.addWidget(self.coverage_banner)
 
-        self.calculate_button = QPushButton("Calculate Calibration")
-        self.calculate_button.setObjectName("primary")
-        self.calculate_button.clicked.connect(
-            self.calculate_calibration
-        )
-
-        self.save_button = QPushButton("Save Profile")
-        self.save_button.setObjectName("primary")
-        self.save_button.clicked.connect(
-            self.save_profile
-        )
-
-        self.clear_button = QPushButton("Clear Session")
-        self.clear_button.setObjectName("secondary")
-        self.clear_button.clicked.connect(
-            self.clear_session
-        )
-
-        self.history_button = QPushButton("Load History")
-        self.history_button.setObjectName("secondary")
-        self.history_button.clicked.connect(
-            self.load_history
-        )
-
-        button_row.addWidget(self.calculate_button)
-        button_row.addWidget(self.save_button)
-        button_row.addWidget(self.clear_button)
-        button_row.addWidget(self.history_button)
-
-        input_layout.addLayout(button_row)
-
-        input_group.setLayout(input_layout)
-        root.addWidget(input_group)
-
-        # Summary
-        self.summary_label = QLabel(
-            "Total: 0 | PASS: 0 | FAIL: 0 | Overall: FAIL"
-        )
-
-        self.summary_label.setStyleSheet("""
-            font-size: 16px;
-            font-weight: bold;
-        """)
-
-        root.addWidget(self.summary_label)
-
-        self.gain_preview_label = QLabel("Gain Correction: -- dB")
-        self.gain_preview_label.setStyleSheet("font-size: 14px; color: #a8c9ff;")
-        root.addWidget(self.gain_preview_label)
-
-        # Table
-        self.table = QTableWidget()
-        self.table.setColumnCount(5)
-
-        self.table.setHorizontalHeaderLabels([
-            "Frequency",
-            "Measured dB",
-            "Reference dB",
-            "Correction dB",
-            "Status"
-        ])
-
+        columns = [
+            tr("Frequency (Hz)"),
+            tr("Measured (dB)"),
+            tr("Reference (dB)"),
+            tr("Gain Correction (dB)"),
+            tr("Corrected (dB)"),
+            tr("Status")
+        ]
+        self.table = QTableWidget(0, len(columns))
+        self.table.setHorizontalHeaderLabels([two_line_header(c) for c in columns])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.doubleClicked.connect(self.recalibrate_selected)
+        setup_table(self.table)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         root.addWidget(self.table)
 
-        # small status labels
-        status_row = QHBoxLayout()
-        self.last_measured_label = QLabel("Last Measured: -- dB")
-        self.cal_level_label = QLabel("Calibration Level: -- dB")
+        table_buttons = QHBoxLayout()
+        self.recalibrate_button = QPushButton(tr("Recalibrate"))
+        self.recalibrate_button.clicked.connect(self.recalibrate_selected)
+        self.delete_button = QPushButton(tr("Delete"))
+        self.delete_button.setObjectName("danger")
+        self.delete_button.clicked.connect(self.delete_selected)
+        table_buttons.addWidget(self.recalibrate_button)
+        table_buttons.addWidget(self.delete_button)
+        table_buttons.addStretch(1)
+        root.addLayout(table_buttons)
+        root.addStretch(1)
 
-        status_row.addWidget(self.last_measured_label)
-        status_row.addWidget(self.cal_level_label)
+    # Live / preview
 
-        root.addLayout(status_row)
+    def on_reading(self, reading):
+        if not self.manual_check.isChecked():
+            self.measured_input.setText(f"{reading['db']:.2f}")
 
-        # table header style
-        header = self.table.horizontalHeader()
-        header.setStretchLastSection(True)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.setStyleSheet('''
-            QTableWidget { background: #0b1220; color: #e6eef8; border: none }
-            QHeaderView::section { background: #121826; color:#d7e1ff; padding:8px; font-weight:700 }
-            QTableWidget::item { padding:6px }
-        ''')
+    def on_manual_toggled(self, manual):
+        self.measured_input.setReadOnly(not manual)
+        self.measured_input.clear()
+        self.measured_input.setPlaceholderText(tr("type measured dB") if manual else tr("start live signal"))
+        # re-polish so the :read-only style (reading vs input look) updates
+        self.measured_input.style().unpolish(self.measured_input)
+        self.measured_input.style().polish(self.measured_input)
+        self.update_preview()
 
-    def calculate_calibration(self):
+    def selected_frequency(self):
+        return self.frequency_combo.currentData()
+
+    def parse(self, line_edit):
         try:
-            frequency = int(
-                self.frequency_combo.currentText()
+            return float(line_edit.text().replace(",", "."))
+        except ValueError:
+            return None
+
+    def update_preview(self):
+        measured = self.parse(self.measured_input)
+        reference = self.parse(self.reference_input)
+
+        if measured is None or reference is None:
+            self.correction_value.setText("--")
+        else:
+            self.correction_value.setText(f"{gain_correction(measured, reference):+.2f}")
+
+        if not self.manual_check.isChecked() and not self.live.is_live():
+            banner(self.form_banner, "warn", tr("Live is off: press Start Live, or tick “Enter manually”."))
+        else:
+            banner(self.form_banner, "warn", "")
+
+    # Actions
+
+    def calibrate(self):
+        frequency = self.selected_frequency()
+        reference = self.parse(self.reference_input)
+        measured = self.parse(self.measured_input)
+
+        if reference is None:
+            QMessageBox.warning(self, tr("Reference missing"),
+                                tr("Enter the level read from the reference sound level meter."))
+            self.reference_input.setFocus()
+            return
+
+        if measured is None:
+            QMessageBox.warning(self, tr("Measured level missing"),
+                                tr("Start Live (left panel), or tick “Enter manually” and type it."))
+            return
+
+        if not self.manual_check.isChecked():
+            reading = self.live.reading()
+            if reading is None or not self.live.has_signal():
+                QMessageBox.warning(self, tr("No signal"),
+                                    tr("No tone detected. Check the audiometer output and the microphone."))
+                return
+
+            if not self.engine.frequency_ok(frequency, reading["frequency"]):
+                answer = QMessageBox.question(
+                    self, tr("Frequency mismatch"),
+                    tr("Selected {selected} Hz, but the detected tone is {detected:.1f} Hz.\n\n"
+                       "Continue anyway?").format(selected=frequency, detected=reading["frequency"])
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+
+        if frequency in self.engine.get_calibration_points():
+            answer = QMessageBox.question(
+                self, tr("Replace calibration"),
+                tr("{freq} Hz is already calibrated. Replace it?").format(freq=frequency)
             )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
 
-            measured = float(
-                self.measured_input.text()
-            )
-
-            reference = float(
-                self.reference_input.text()
-            )
-
-            gain_correction = float(
-                self.gain_correction_input.text() or "0"
-            )
-
-            tolerance = float(
-                self.tolerance_input.text()
-            )
-
-            result = self.engine.calculate_correction(
-                frequency,
-                measured,
-                reference,
-                tolerance,
-                gain_correction_db=gain_correction
-            )
-
-            self.add_result_to_table(result)
-            self.update_summary()
-
-            # update small status labels
-            self.last_measured_label.setText(f"Last Measured: {result['measured_db']:.2f} dB")
-            self.cal_level_label.setText(f"Calibration Level: {result['reference_db']:.2f} dB")
-
+        self.engine.calibrate(frequency, measured, reference)
+        self.reference_input.clear()
+        if self.manual_check.isChecked():
             self.measured_input.clear()
-            self.reference_input.clear()
 
-        except ValueError:
-            QMessageBox.warning(
-                self,
-                "Input Error",
-                "Enter valid numeric values."
-            )
+        self.refresh_table()
+        self.select_next_uncalibrated()
+        self.calibration_changed.emit()
 
-    def on_manual_measured_edit(self, text):
-        if self.measured_input.hasFocus():
-            self.auto_fill_measured = False
-        self.maybe_auto_update_gain_correction()
-        self.update_correction_preview()
+    def select_next_uncalibrated(self):
+        remaining = self.engine.uncalibrated_frequencies()
+        if remaining:
+            self.frequency_combo.setCurrentIndex(IEC_FREQUENCIES.index(remaining[0]))
 
-    def on_reference_changed(self, text):
-        self.maybe_auto_update_gain_correction()
-        self.update_correction_preview()
+    def selected_table_frequency(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return None
+        return self.table.item(row, 0).sort_value
 
-    def on_gain_correction_edited(self, text):
-        if self.gain_correction_input.hasFocus():
-            self.auto_gain_correction = (text.strip() == "")
-            if self.auto_gain_correction:
-                self.maybe_auto_update_gain_correction()
-        self.update_correction_preview()
+    def recalibrate_selected(self, *_):
+        frequency = self.selected_table_frequency()
+        if frequency is None:
+            QMessageBox.information(self, tr("Select a row"), tr("Select a row in the table first."))
+            return
+        self.frequency_combo.setCurrentIndex(IEC_FREQUENCIES.index(frequency))
+        self.reference_input.setFocus()
 
-    def set_measured_value(self, value):
-        if not self.auto_fill_measured:
+    def delete_selected(self):
+        frequency = self.selected_table_frequency()
+        if frequency is None:
+            QMessageBox.information(self, tr("Select a row"), tr("Select a row in the table first."))
             return
 
-        self.measured_input.blockSignals(True)
-        self.measured_input.setText(f"{value:.2f}")
-        self.measured_input.blockSignals(False)
-        self.maybe_auto_update_gain_correction()
-        self.update_correction_preview()
-
-    def maybe_auto_update_gain_correction(self):
-        if not self.auto_gain_correction:
+        if frequency not in self.engine.get_calibration_points():
             return
 
-        try:
-            measured = float(self.measured_input.text())
-            reference = float(self.reference_input.text())
-            correction = reference - measured
-
-            self.gain_correction_input.blockSignals(True)
-            self.gain_correction_input.setText(f"{correction:.2f}")
-            self.gain_correction_input.blockSignals(False)
-        except ValueError:
-            pass
-
-    def update_correction_preview(self):
-        try:
-            gain_adjust = float(self.gain_correction_input.text() or "0")
-            self.gain_preview_label.setText(
-                f"Gain Correction: {gain_adjust:+.2f} dB"
-            )
-        except ValueError:
-            self.gain_preview_label.setText("Gain Correction: -- dB")
-
-    def add_result_to_table(self, result):
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-
-        self.table.setItem(
-            row,
-            0,
-            QTableWidgetItem(str(result["frequency"]))
+        answer = QMessageBox.question(
+            self, tr("Delete calibration"),
+            tr("Delete the calibration for {freq} Hz?").format(freq=frequency)
         )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
 
-        self.table.setItem(
-            row,
-            1,
-            QTableWidgetItem(
-                f"{result['measured_db']:.2f}"
-            )
-        )
+        self.engine.delete_calibration_point(frequency)
+        self.refresh_table()
+        self.calibration_changed.emit()
 
-        self.table.setItem(
-            row,
-            2,
-            QTableWidgetItem(
-                f"{result['reference_db']:.2f}"
-            )
-        )
-
-        self.table.setItem(
-            row,
-            3,
-            QTableWidgetItem(
-                f"{result['correction_db']:.2f}"
-            )
-        )
-
-        self.table.setItem(
-            row,
-            4,
-            QTableWidgetItem(result["status"])
-        )
-
-    def update_summary(self):
-        summary = self.engine.get_summary()
-
-        self.summary_label.setText(
-            f"Total: {summary['total']} | "
-            f"PASS: {summary['passed']} | "
-            f"FAIL: {summary['failed']} | "
-            f"Overall: {summary['overall']}"
-        )
-
-    def save_profile(self):
-        self.engine.save_profile()
-
-        QMessageBox.information(
-            self,
-            "Saved",
-            "Calibration profile saved."
-        )
-
-    def clear_session(self):
-        self.engine.clear_session()
-        self.table.setRowCount(0)
-        self.update_summary()
-
-    def load_history(self):
-        rows = self.engine.get_history()
+    def refresh_table(self):
+        points = self.engine.get_calibration_points()
 
         self.table.setRowCount(0)
-
-        for row_data in rows:
+        for frequency in IEC_FREQUENCIES:
             row = self.table.rowCount()
             self.table.insertRow(row)
+            self.table.setItem(row, 0, NumericItem(frequency, str(frequency)))
 
-            frequency = row_data[1]
-            measured = row_data[2]
-            reference = row_data[3]
-            correction = row_data[4]
-            status = row_data[5]
+            point = points.get(frequency)
+            if point is None:
+                for col in range(1, 5):
+                    self.table.setItem(row, col, status_item(None, "—"))
+                self.table.setItem(row, 5, status_item(None, tr("NOT CALIBRATED")))
+                continue
 
-            self.table.setItem(
-                row,
-                0,
-                QTableWidgetItem(str(frequency))
-            )
+            self.table.setItem(row, 1, NumericItem(point["measured_db"], f"{point['measured_db']:.2f}"))
+            self.table.setItem(row, 2, NumericItem(point["reference_db"], f"{point['reference_db']:.2f}"))
+            self.table.setItem(row, 3, NumericItem(point["gain_correction_db"],
+                                                   f"{point['gain_correction_db']:+.2f}"))
+            self.table.setItem(row, 4, NumericItem(point["corrected_db"], f"{point['corrected_db']:.2f}"))
+            status = status_item(point["status"])
+            status.setToolTip(tr("Calibrated at {time}").format(time=point["timestamp"]))
+            self.table.setItem(row, 5, status)
 
-            self.table.setItem(
-                row,
-                1,
-                QTableWidgetItem(f"{measured:.2f}")
-            )
+        fit_table_height(self.table)
 
-            self.table.setItem(
-                row,
-                2,
-                QTableWidgetItem(f"{reference:.2f}")
-            )
-
-            self.table.setItem(
-                row,
-                3,
-                QTableWidgetItem(f"{correction:.2f}")
-            )
-
-            self.table.setItem(
-                row,
-                4,
-                QTableWidgetItem(status)
-            )
-
-        # update small labels with most recent if available
-        if rows:
-            latest = rows[0]
-            self.last_measured_label.setText(f"Last Measured: {latest[2]:.2f} dB")
-            self.cal_level_label.setText(f"Calibration Level: {latest[3]:.2f} dB")
+        missing = [f for f in IEC_FREQUENCIES if f not in points]
+        if missing:
+            banner(self.coverage_banner, "warn",
+                   tr("Not calibrated yet: {list}").format(list=", ".join(f"{f} Hz" for f in missing)))
+        else:
+            banner(self.coverage_banner, "ok", tr("All frequencies calibrated."))
