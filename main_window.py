@@ -1,0 +1,351 @@
+from PyQt6.QtWidgets import (
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QComboBox,
+    QTabWidget,
+    QLineEdit,
+    QMessageBox,
+    QFrame
+)
+
+from PyQt6.QtCore import QTimer, Qt
+
+from core.audio_engine import AudioEngine
+from core.signal_analysis import SignalAnalyzer
+
+from ui.widgets.spectrum_widget import SpectrumWidget
+from ui.calibration_page import CalibrationPage
+from ui.report_page import ReportPage
+
+from core.constants import APP_NAME, ORG_NAME
+
+
+class BigMetricCard(QFrame):
+    """Kartu bacaan besar untuk Frequency / Level / THD."""
+
+    def __init__(self, title, value_font_px=52):
+        super().__init__()
+
+        self.setStyleSheet("""
+            BigMetricCard {
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 10px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(2)
+
+        self.title_label = QLabel(title)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setStyleSheet(
+            "font-size: 16px; color: #9fb3c8; background: transparent; border: none;"
+        )
+
+        self.value_label = QLabel("--")
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.value_label.setStyleSheet(
+            f"font-size: {value_font_px}px; font-weight: 700; color: #f0f6ff;"
+            "background: transparent; border: none;"
+        )
+
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.value_label)
+
+        self.setMinimumHeight(115)
+
+    def set_value(self, text):
+        self.value_label.setText(text)
+
+
+class MeasurementPage(QWidget):
+    """Halaman gabungan: Measurement (atas) + Report (bawah)."""
+
+    def __init__(self, calibration_engine=None, calibration_page=None):
+        super().__init__()
+
+        self.calibration_engine = calibration_engine
+        self.calibration_page = calibration_page
+
+        self.audio = AudioEngine()
+        self.analyzer = SignalAnalyzer()
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.live_measure)
+
+        self.is_measuring = False
+
+        self.current_result = None
+
+        self.setup_ui()
+        self.load_devices()
+
+    def setup_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 6, 12, 6)
+        root.setSpacing(6)
+
+        device_row = QHBoxLayout()
+
+        self.device_combo = QComboBox()
+
+        self.refresh_button = QPushButton("Refresh Devices")
+        self.refresh_button.clicked.connect(
+            self.load_devices
+        )
+
+        device_row.addWidget(QLabel("Input Device"))
+        device_row.addWidget(self.device_combo, stretch=1)
+        device_row.addWidget(self.refresh_button)
+
+        root.addLayout(device_row)
+
+        # Kartu bacaan diperbesar
+        metrics = QHBoxLayout()
+        metrics.setSpacing(10)
+
+        self.freq_card = BigMetricCard("Frequency")
+        self.db_card = BigMetricCard("Level")
+        self.thd_card = BigMetricCard("THD")
+
+        metrics.addWidget(self.freq_card)
+        metrics.addWidget(self.db_card)
+        metrics.addWidget(self.thd_card)
+
+        root.addLayout(metrics)
+
+        # Grafik dikecilkan
+        self.spectrum = SpectrumWidget()
+        self.spectrum.setFixedHeight(110)
+        root.addWidget(self.spectrum)
+
+        # Target inputs
+        target_row = QHBoxLayout()
+        target_row.setSpacing(12)
+
+        self.target_freq = QComboBox()
+        self.target_freq.addItems([
+            "125",
+            "250",
+            "500",
+            "1000",
+            "2000",
+            "4000",
+            "8000"
+        ])
+
+        self.target_level = QLineEdit()
+        self.target_level.setPlaceholderText("Target Level dB")
+        self.target_level.setFixedWidth(120)
+
+        target_row.addWidget(QLabel("Target Frequency"))
+        target_row.addWidget(self.target_freq, stretch=1)
+        target_row.addWidget(QLabel("Target Level dB"))
+        target_row.addWidget(self.target_level)
+
+        self.pass_fail_label = QLabel("Status: --")
+        self.pass_fail_label.setStyleSheet("font-size:12px; color:#cde6ff;")
+        target_row.addWidget(self.pass_fail_label)
+
+        root.addLayout(target_row)
+
+        button_row = QHBoxLayout()
+
+        self.measure_button = QPushButton("Start Live")
+        self.measure_button.setObjectName("primary")
+        self.measure_button.clicked.connect(self.toggle_measurement)
+
+        self.save_button = QPushButton("Save Measurement")
+        self.save_button.setObjectName("primary")
+        self.save_button.clicked.connect(self.save_measurement)
+
+        button_row.addWidget(self.measure_button)
+        button_row.addWidget(self.save_button)
+
+        root.addLayout(button_row)
+
+        # Report digabung di bawah (tabel + hapus data + export)
+        self.report_page = ReportPage()
+        self.report_page.setMinimumHeight(260)
+        root.addWidget(self.report_page, stretch=1)
+
+    def load_devices(self):
+        self.device_combo.clear()
+
+        devices = self.audio.get_devices()
+
+        for idx, name in devices:
+            self.device_combo.addItem(name, idx)
+
+    def selected_device(self):
+        return self.device_combo.currentData()
+
+    def toggle_measurement(self):
+        if not self.is_measuring:
+            self.audio.set_device(
+                self.selected_device()
+            )
+
+            self.timer.start(300)
+            self.is_measuring = True
+            self.measure_button.setText("Stop Live")
+
+        else:
+            self.timer.stop()
+            self.is_measuring = False
+            self.measure_button.setText("Start Live")
+
+            if self.calibration_page is not None and self.current_result is not None:
+                self.calibration_page.set_measured_value(self.current_result['db'])
+
+    def live_measure(self):
+        try:
+            signal = self.audio.capture()
+
+            result = self.analyzer.analyze(
+                signal,
+                self.audio.sample_rate
+            )
+
+            self.current_result = result
+
+            self.freq_card.set_value(
+                f"{result['frequency']:.2f} Hz"
+            )
+
+            self.db_card.set_value(
+                f"{result['db']:.2f} dB"
+            )
+
+            self.thd_card.set_value(
+                f"{result['thd']:.2f}%"
+            )
+
+            self.spectrum.update_plot(
+                result["frequencies"],
+                result["spectrum"]
+            )
+
+        except Exception:
+            self.timer.stop()
+            self.is_measuring = False
+            self.measure_button.setText("Start Live")
+
+    def get_current_measurement(self):
+        if self.current_result is None:
+            return None
+
+        return {
+            "frequency": int(
+                min(
+                    [125, 250, 500, 1000, 2000, 4000, 8000],
+                    key=lambda x: abs(
+                        x - self.current_result["frequency"]
+                    )
+                )
+            ),
+            "measured_db": self.current_result["db"],
+            "thd": self.current_result["thd"]
+        }
+
+    def save_measurement(self):
+        from database.db import CalibrationDatabase
+
+        measurement = self.get_current_measurement()
+
+        if measurement is None:
+            QMessageBox.warning(self, "No Data", "No measurement available to save.")
+            return
+
+        try:
+            target_freq = int(self.target_freq.currentText())
+            target_level = float(self.target_level.text())
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "Enter a valid numeric target level.")
+            return
+
+        measured_db = measurement["measured_db"]
+        thd = measurement.get("thd", 0.0)
+
+        # apply last calibration offset if available
+        offset = 0.0
+
+        if self.calibration_engine is not None:
+            profile = self.calibration_engine.get_profile()
+            offset = float(profile.get(str(target_freq), 0.0))
+
+        adjusted_db = measured_db + offset
+        thd_tolerance = self.calibration_engine.PASS_THD_PERCENT if self.calibration_engine else 3.0
+
+        level_pass = adjusted_db == target_level
+        thd_pass = thd <= thd_tolerance
+        status = "PASS" if level_pass and thd_pass else "FAIL"
+
+        if self.calibration_page is not None:
+            self.calibration_page.set_measured_value(measured_db)
+
+        db = CalibrationDatabase()
+        db.add_measurement_record(
+            target_freq,
+            target_level,
+            measured_db,
+            adjusted_db,
+            thd,
+            status
+        )
+
+        status_color = "#2ecc71" if status == "PASS" else "#e74c3c"
+        self.pass_fail_label.setText(f"Status: {status}")
+        self.pass_fail_label.setStyleSheet(f"font-size:12px; color:{status_color}; font-weight:bold;")
+
+        # tabel report langsung ter-update
+        self.report_page.load_data()
+
+        QMessageBox.information(self, "Saved", "Measurement saved to database.")
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle(
+            f"{APP_NAME} - {ORG_NAME}"
+        )
+
+        self.resize(1500, 950)
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        tabs = QTabWidget()
+
+        # Calibration (kiri), lalu Measurement & Report (gabungan)
+        self.calibration_page = CalibrationPage()
+
+        self.measurement_page = MeasurementPage(
+            calibration_engine=self.calibration_page.engine,
+            calibration_page=self.calibration_page
+        )
+
+        # tetap bisa diakses dari luar bila diperlukan
+        self.report_page = self.measurement_page.report_page
+
+        tabs.addTab(self.calibration_page, "Calibration")
+        tabs.addTab(self.measurement_page, "Measurement && Report")
+
+        # global styles for buttons and inputs to improve visibility
+        self.setStyleSheet('''
+            QPushButton { background: #14232b; color: #eaf6ff; padding:8px 12px; border-radius:6px; }
+            QPushButton#primary { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #2b90ff, stop:1 #1b6fff); color: white; font-weight:600 }
+            QPushButton#secondary { background: #2b3944; color:#dbeaf7 }
+            QPushButton#danger { background: #c0392b; color: white; font-weight:600 }
+            QComboBox, QLineEdit { background: #081421; color:#eaf6ff; padding:6px; border-radius:6px }
+        ''')
+
+        self.setCentralWidget(tabs)
