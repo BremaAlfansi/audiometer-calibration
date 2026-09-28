@@ -1,121 +1,151 @@
-import json
-import os
-
+from core.constants import (
+    IEC_FREQUENCIES,
+    TEST_LEVELS_DB,
+    LEVEL_RESOLUTION_DB,
+    LEVEL_TOLERANCE_DB,
+    FREQUENCY_TOLERANCE_PCT,
+    THD_MAX_PCT,
+    PASS,
+    FAIL
+)
 from database.db import CalibrationDatabase
 
 
+def levels_match(a, b):
+    """True when two levels are identical at the displayed resolution."""
+    return round(a / LEVEL_RESOLUTION_DB) == round(b / LEVEL_RESOLUTION_DB)
+
+
+def gain_correction(measured_db, reference_db):
+    """Gain correction = Reference - Measured.
+
+    Adding it to a measured reading gives the reference-scale level:
+    calibrated = measured + correction.
+    """
+    return reference_db - measured_db
+
+
 class CalibrationEngine:
-    IEC_FREQUENCIES = [
-        125,
-        250,
-        500,
-        1000,
-        2000,
-        4000,
-        8000
-    ]
+    IEC_FREQUENCIES = IEC_FREQUENCIES
+    TEST_LEVELS_DB = TEST_LEVELS_DB
 
-    PASS_TOLERANCE_DB = 3.0
+    def __init__(self, database=None):
+        self.database = database or CalibrationDatabase()
 
-    def __init__(self):
-        self.profile_path = "config/calibration_profile.json"
-        self.database = CalibrationDatabase()
+    # Step 2: calibration (one gain correction per frequency)
 
-        self.offsets = {
-            str(freq): 0.0
-            for freq in self.IEC_FREQUENCIES
-        }
+    @staticmethod
+    def with_corrected_level(point):
+        """Add the corrected level and judge it: PASS when Measured + Correction equals Reference."""
+        point["corrected_db"] = point["measured_db"] + point["gain_correction_db"]
+        point["status"] = PASS if levels_match(point["corrected_db"], point["reference_db"]) else FAIL
+        return point
 
-        self.session_results = []
-
-        self.load_profile()
-
-    def calculate_correction(
-        self,
-        frequency,
-        measured_db,
-        reference_db,
-        tolerance_db=None,
-        gain_correction_db=0.0
-    ):
-        correction = gain_correction_db
-
-        tolerance = (
-            tolerance_db
-            if tolerance_db is not None
-            else self.PASS_TOLERANCE_DB
-        )
-
-        status = (
-            "PASS"
-            if abs(correction) <= tolerance
-            else "FAIL"
-        )
-
-        result = {
+    def calibrate(self, frequency, measured_db, reference_db):
+        point = self.with_corrected_level({
             "frequency": frequency,
             "measured_db": measured_db,
             "reference_db": reference_db,
-            "gain_correction_db": gain_correction_db,
-            "correction_db": correction,
-            "status": status
+            "gain_correction_db": gain_correction(measured_db, reference_db)
+        })
+        self.database.upsert_calibration_point(point)
+        return point
+
+    def get_calibration_points(self):
+        # Status is recomputed on read so points saved under an older rule are judged the same way.
+        return {
+            p["frequency"]: self.with_corrected_level(p)
+            for p in self.database.get_calibration_points()
         }
 
-        self.session_results.append(result)
+    def get_correction(self, frequency):
+        point = self.get_calibration_points().get(frequency)
+        return None if point is None else point["gain_correction_db"]
 
-        self.offsets[str(frequency)] = correction
+    def delete_calibration_point(self, frequency):
+        self.database.delete_calibration_point(frequency)
 
-        self.database.add_record(
-            frequency,
-            measured_db,
-            reference_db,
-            correction,
-            status
-        )
+    def uncalibrated_frequencies(self):
+        points = self.get_calibration_points()
+        return [f for f in IEC_FREQUENCIES if f not in points]
 
-        return result
+    # Step 3: verification (per-parameter pass/fail)
 
-    def get_session_results(self):
-        return self.session_results
+    @staticmethod
+    def frequency_ok(target_hz, measured_hz):
+        return abs(measured_hz - target_hz) <= target_hz * FREQUENCY_TOLERANCE_PCT / 100
 
-    def clear_session(self):
-        self.session_results = []
+    @staticmethod
+    def level_ok(frequency, target_db, calibrated_db):
+        # Round the deviation to the display resolution so 3.04 dB off reads as 3.0 and passes.
+        deviation = round(abs(calibrated_db - target_db) / LEVEL_RESOLUTION_DB) * LEVEL_RESOLUTION_DB
+        return deviation <= LEVEL_TOLERANCE_DB[frequency] + 1e-9
 
-    def get_summary(self):
-        total = len(self.session_results)
+    def evaluate(self, frequency, level_db, reading, correction_db):
+        calibrated_db = reading["db"] + correction_db
 
-        passed = sum(
-            1 for item in self.session_results
-            if item["status"] == "PASS"
-        )
+        frequency_status = PASS if self.frequency_ok(frequency, reading["frequency"]) else FAIL
+        level_status = PASS if self.level_ok(frequency, level_db, calibrated_db) else FAIL
+        thd_status = PASS if reading["thd"] <= THD_MAX_PCT else FAIL
 
-        failed = total - passed
-
-        overall = "PASS" if failed == 0 and total > 0 else "FAIL"
+        statuses = (frequency_status, level_status, thd_status)
 
         return {
-            "total": total,
-            "passed": passed,
-            "failed": failed,
-            "overall": overall
+            "frequency": frequency,
+            "level_db": level_db,
+            "measured_frequency": reading["frequency"],
+            "frequency_status": frequency_status,
+            "measured_db": reading["db"],
+            "gain_correction_db": correction_db,
+            "calibrated_db": calibrated_db,
+            "level_status": level_status,
+            "thd": reading["thd"],
+            "thd_status": thd_status,
+            "overall_status": PASS if all(s == PASS for s in statuses) else FAIL
         }
 
-    def save_profile(self):
-        os.makedirs("config", exist_ok=True)
+    def save_result(self, result):
+        self.database.upsert_verification_result(result)
 
-        with open(self.profile_path, "w") as f:
-            json.dump(self.offsets, f, indent=4)
+    def has_result(self, frequency, level_db):
+        return self.database.has_verification_result(frequency, level_db)
 
-    def load_profile(self):
-        if os.path.exists(self.profile_path):
-            with open(self.profile_path, "r") as f:
-                self.offsets.update(json.load(f))
+    def delete_result(self, frequency, level_db):
+        self.database.delete_verification_result(frequency, level_db)
 
-    def get_profile(self):
-        return self.offsets
+    def get_results(self):
+        return self.database.get_verification_results()
 
-    def get_history(self):
-        return self.database.get_all_records()
+    def coverage(self):
+        """Map every planned (frequency, level) pair to its result, or None."""
+        grid = {
+            (f, float(l)): None
+            for f in IEC_FREQUENCIES
+            for l in TEST_LEVELS_DB
+        }
+        for r in self.get_results():
+            grid[(r["frequency"], float(r["level_db"]))] = r
+        return grid
 
-    def clear_history(self):
-        self.database.clear_history()
+    def missing_points(self):
+        return [key for key, r in self.coverage().items() if r is None]
+
+    def summary(self):
+        results = self.get_results()
+        passed = sum(1 for r in results if r["overall_status"] == PASS)
+        planned = len(IEC_FREQUENCIES) * len(TEST_LEVELS_DB)
+        missing = len(self.missing_points())
+        failed = len(results) - passed
+
+        return {
+            "planned": planned,
+            "measured": len(results),
+            "passed": passed,
+            "failed": failed,
+            "missing": missing,
+            "overall": PASS if failed == 0 and missing == 0 and results else FAIL
+        }
+
+    def clear_all(self):
+        self.database.clear_calibration_points()
+        self.database.clear_verification_results()
