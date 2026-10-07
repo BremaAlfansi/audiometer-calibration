@@ -1,6 +1,7 @@
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QDate, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget,
+    QDateEdit,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
@@ -14,7 +15,7 @@ from PyQt6.QtWidgets import (
 
 from core.calibration_engine import CalibrationEngine
 from core.constants import IEC_FREQUENCIES, TEST_LEVELS_DB
-from reports.report_data import collect_report_data, report_warnings
+from reports.report_data import collect_report_data, report_warnings, report_file_name
 from reports.pdf_report import PDFReport
 from reports.csv_report import export_csv, export_xlsx
 from ui.i18n import tr
@@ -92,9 +93,18 @@ class ReportPage(QWidget):
         xlsx_button.clicked.connect(self.export_xlsx)
         clear = QPushButton(tr("New Calibration"))
         clear.setObjectName("danger")
-        clear.setToolTip(tr("Delete all calibration points and measurement results"))
+        clear.setToolTip(tr("Delete the calibration and all measurement results"))
         clear.clicked.connect(self.clear_all)
 
+        self.report_date = QDateEdit()
+        self.report_date.setCalendarPopup(True)
+        self.report_date.setDisplayFormat("yyyy-MM-dd")
+        self.report_date.setToolTip(tr("Date printed at the signature and used in the file name"))
+        self.report_date.dateChanged.connect(self.on_report_date_changed)
+
+        buttons.addWidget(QLabel(tr("Report date")))
+        buttons.addWidget(self.report_date)
+        buttons.addSpacing(12)
         buttons.addWidget(pdf_button)
         buttons.addWidget(csv_button)
         buttons.addWidget(xlsx_button)
@@ -102,9 +112,16 @@ class ReportPage(QWidget):
         buttons.addWidget(clear)
         root.addLayout(buttons)
 
+    def on_report_date_changed(self, value):
+        self.engine.database.save_device_info({"report_date": value.toString("yyyy-MM-dd")})
+
     def refresh(self):
         data = collect_report_data(self.engine)
         info = data["device_info"]
+
+        self.report_date.blockSignals(True)
+        self.report_date.setDate(QDate.fromString(data["report_date"], "yyyy-MM-dd"))
+        self.report_date.blockSignals(False)
 
         device = " ".join(v for v in [info["brand"], info["model"]] if v) or "—"
         self.device_label.setText(
@@ -180,7 +197,7 @@ class ReportPage(QWidget):
 
     def export_file(self, default_name, file_filter, writer):
         data = collect_report_data(self.engine)
-        if not data["results"] and not data["calibration_points"]:
+        if not data["results"] and data["reference_point"] is None:
             QMessageBox.warning(self, tr("Nothing to export"), tr("There is no calibration or measurement data yet."))
             return
 
@@ -200,9 +217,7 @@ class ReportPage(QWidget):
         QMessageBox.information(self, tr("Exported"), tr("Saved to:") + f"\n{path}")
 
     def default_name(self, ext):
-        info = self.engine.database.get_device_info()
-        parts = ["calibration", info["model"] or info["brand"], info["calibration_date"]]
-        return "_".join(p.replace(" ", "-") for p in parts if p) + ext
+        return report_file_name(self.engine, ext)
 
     def export_pdf(self):
         self.export_file(self.default_name(".pdf"), "PDF (*.pdf)", PDFReport.export_calibration_report)
@@ -216,8 +231,9 @@ class ReportPage(QWidget):
     def clear_all(self):
         answer = QMessageBox.warning(
             self, tr("New Calibration"),
-            tr("This deletes ALL calibration points and measurement results.\n"
-               "Device information is kept. Export the report first if you need it.\n\nContinue?"),
+            tr("This deletes the calibration and ALL measurement results.\n"
+               "Device information and microphone response corrections are kept.\n"
+               "Export the report or save the session first if you need it.\n\nContinue?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )

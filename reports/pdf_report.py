@@ -15,6 +15,7 @@ from reportlab.platypus import (
 
 from core.constants import (
     APP_NAME,
+    REFERENCE_FREQUENCY,
     ORG_NAME,
     IEC_FREQUENCIES,
     TEST_LEVELS_DB,
@@ -94,7 +95,7 @@ class PDFReport:
         device_rows = [
             ["Brand", info["brand"] or "—", "Calibration date", info["calibration_date"] or "—"],
             ["Model / Type", info["model"] or "—", "Technician", info["technician"] or "—"],
-            ["Serial number", info["serial_number"] or "—", "", ""],
+            ["Serial number", info["serial_number"] or "—", "Report date", data["report_date"]],
         ]
         device_table = Table(device_rows, colWidths=[30 * mm, 60 * mm, 32 * mm, 58 * mm])
         device_table.setStyle(TableStyle([
@@ -135,37 +136,54 @@ class PDFReport:
 
         elements.append(Spacer(1, 4))
         elements.append(Paragraph(
-            f"<b>Criteria:</b> Calibration: corrected level equals reference ({LEVEL_RESOLUTION_DB:g} dB resolution). "
+            f"<b>Criteria:</b> Calibration: corrected level equals calibrator level ({LEVEL_RESOLUTION_DB:g} dB resolution). "
             f"Measurement: frequency within ±{FREQUENCY_TOLERANCE_PCT:g} % of nominal; "
             f"level {level_tolerance_text()}; "
             f"THD &lt;= {THD_MAX_PCT:g} %.", small
         ))
 
-        # Calibration points
-        cal_block = [Paragraph("Calibration: Gain Correction per Frequency", h2)]
-        cal_rows = [["Frequency (Hz)", "Measured (dB)", "Reference (dB)",
+        # Reference calibration (1 kHz, acoustic calibrator)
+        cal_block = [Paragraph(f"Reference Calibration ({REFERENCE_FREQUENCY} Hz, acoustic calibrator)", h2)]
+        cal_rows = [["Frequency (Hz)", "Measured (dB)", "Calibrator (dB)",
                      "Gain Correction (dB)", "Corrected (dB)", "Status"]]
         cal_style = base_table_style()
-        points = {p["frequency"]: p for p in data["calibration_points"]}
-        for i, f in enumerate(IEC_FREQUENCIES, start=1):
-            p = points.get(f)
-            if p is None:
-                cal_rows.append([f, "—", "—", "—", "—", "NOT CALIBRATED"])
-                cal_style += status_style(5, i, None)
-            else:
-                cal_rows.append([
-                    f, f"{p['measured_db']:.2f}", f"{p['reference_db']:.2f}",
-                    f"{p['gain_correction_db']:+.2f}", f"{p['corrected_db']:.2f}", p["status"]
-                ])
-                cal_style += status_style(5, i, p["status"])
+        p = data["reference_point"]
+        if p is None:
+            cal_rows.append([REFERENCE_FREQUENCY, "—", "—", "—", "—", "NOT CALIBRATED"])
+            cal_style += status_style(5, 1, None)
+        else:
+            cal_rows.append([
+                REFERENCE_FREQUENCY, f"{p['measured_db']:.2f}", f"{p['reference_db']:.2f}",
+                f"{p['gain_correction_db']:+.2f}", f"{p['corrected_db']:.2f}", p["status"]
+            ])
+            cal_style += status_style(5, 1, p["status"])
         cal_table = Table(cal_rows, colWidths=[26 * mm, 28 * mm, 28 * mm, 34 * mm, 28 * mm, 34 * mm])
         cal_table.setStyle(TableStyle(cal_style))
         cal_block.append(cal_table)
         cal_block.append(Spacer(1, 2))
         cal_block.append(Paragraph(
-            "Gain Correction = Reference - Measured. Corrected = Measured + Gain Correction.", small
+            "Gain Correction = Calibrator - Measured. Corrected = Measured + Gain Correction.", small
         ))
         elements.append(KeepTogether(cal_block))
+
+        # Calibration points: microphone frequency-response correction
+        resp_block = [Paragraph("Calibration Points (microphone response, relative to 1 kHz)", h2)]
+        resp_rows = [["Frequency (Hz)", "Response Correction (dB)", "Total Correction (dB)"]]
+        for r in data["response"]:
+            resp_rows.append([
+                r["frequency"],
+                "0.00 (reference)" if r["frequency"] == REFERENCE_FREQUENCY else f"{r['response_db']:+.2f}",
+                "—" if r["total_db"] is None else f"{r['total_db']:+.2f}"
+            ])
+        resp_table = Table(resp_rows, colWidths=[40 * mm, 60 * mm, 60 * mm])
+        resp_table.setStyle(TableStyle(base_table_style()))
+        resp_block.append(resp_table)
+        resp_block.append(Spacer(1, 2))
+        resp_block.append(Paragraph(
+            "Total Correction = Gain Correction + Response Correction; added to every raw reading at that frequency.",
+            small
+        ))
+        elements.append(KeepTogether(resp_block))
 
         # Completeness grid
         grid_block = [Paragraph("Data Completeness (Frequency × Level)", h2)]
@@ -213,7 +231,7 @@ class PDFReport:
         technician = escape(info["technician"]) or "____________________"
         sign_rows = [
             ["Calibrated by", "Signature", "Date"],
-            [technician, "", info["calibration_date"] or ""]
+            [technician, "", data["report_date"]]
         ]
         sign_table = Table(sign_rows, colWidths=[60 * mm, 60 * mm, 50 * mm], rowHeights=[None, 18 * mm])
         sign_table.setStyle(TableStyle([

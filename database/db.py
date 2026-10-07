@@ -1,10 +1,32 @@
 import os
 import sqlite3
+import struct
 from datetime import datetime
+
+import numpy as np
+
+# Without these, sqlite3 stores NumPy scalars (audio is float32) as raw bytes.
+for _numpy_type in (np.float16, np.float32, np.float64):
+    sqlite3.register_adapter(_numpy_type, float)
+for _numpy_type in (np.int8, np.int16, np.int32, np.int64):
+    sqlite3.register_adapter(_numpy_type, int)
+
+REAL_COLUMNS = {
+    "calibration_points": ["measured_db", "reference_db", "gain_correction_db"],
+    "verification_results": [
+        "level_db", "measured_frequency", "measured_db",
+        "gain_correction_db", "calibrated_db", "thd"
+    ]
+}
 
 
 def now_str():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def blob_to_float(blob):
+    """Decode a NumPy float32/float64 that an older version stored as raw bytes."""
+    return struct.unpack("<f" if len(blob) == 4 else "<d", blob)[0]
 
 
 class CalibrationDatabase:
@@ -14,7 +36,8 @@ class CalibrationDatabase:
         "serial_number",
         "calibration_date",
         "technician",
-        "notes"
+        "notes",
+        "report_date"
     ]
 
     def __init__(self, db_path="database/audicalpro.db"):
@@ -68,8 +91,32 @@ class CalibrationDatabase:
         )
         """)
 
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS frequency_response (
+            frequency INTEGER PRIMARY KEY,
+            correction_db REAL NOT NULL
+        )
+        """)
+
+        self.repair_byte_values(cur)
+
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def repair_byte_values(cur):
+        """Turn numbers that were saved as raw float32/float64 bytes back into numbers."""
+        for table, columns in REAL_COLUMNS.items():
+            for column in columns:
+                rows = cur.execute(
+                    f"SELECT rowid, {column} FROM {table} WHERE typeof({column}) = 'blob'"
+                ).fetchall()
+                for rowid, blob in rows:
+                    if len(blob) in (4, 8):
+                        cur.execute(
+                            f"UPDATE {table} SET {column} = ? WHERE rowid = ?",
+                            (blob_to_float(blob), rowid)
+                        )
 
     # Calibration points
 
@@ -81,7 +128,7 @@ class CalibrationDatabase:
         VALUES (?, ?, ?, ?, ?, ?)
         """, (
             point["frequency"],
-            now_str(),
+            point.get("timestamp") or now_str(),
             point["measured_db"],
             point["reference_db"],
             point["gain_correction_db"],
@@ -114,6 +161,28 @@ class CalibrationDatabase:
         conn.commit()
         conn.close()
 
+    # Microphone frequency-response corrections (dB relative to the reference frequency)
+
+    def get_response_corrections(self):
+        conn = self.connect()
+        rows = conn.execute("SELECT frequency, correction_db FROM frequency_response").fetchall()
+        conn.close()
+        return dict(rows)
+
+    def set_response_correction(self, frequency, correction_db):
+        conn = self.connect()
+        conn.execute("""
+        INSERT OR REPLACE INTO frequency_response (frequency, correction_db) VALUES (?, ?)
+        """, (frequency, correction_db))
+        conn.commit()
+        conn.close()
+
+    def clear_response_corrections(self):
+        conn = self.connect()
+        conn.execute("DELETE FROM frequency_response")
+        conn.commit()
+        conn.close()
+
     # Verification results
 
     def upsert_verification_result(self, result):
@@ -128,7 +197,7 @@ class CalibrationDatabase:
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            now_str(),
+            result.get("timestamp") or now_str(),
             result["frequency"],
             result["level_db"],
             result["measured_frequency"],
@@ -189,12 +258,14 @@ class CalibrationDatabase:
         return info
 
     def save_device_info(self, info):
+        """Save the given fields; fields not in `info` keep their stored value."""
         conn = self.connect()
         conn.executemany("""
         INSERT OR REPLACE INTO device_info (key, value) VALUES (?, ?)
         """, [
-            (field, str(info.get(field, "")))
+            (field, str(info[field]))
             for field in self.DEVICE_FIELDS
+            if field in info
         ])
         conn.commit()
         conn.close()

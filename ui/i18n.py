@@ -54,8 +54,18 @@ ID = {
     "Uncorrected input level (dBFS).": "Level input sebelum koreksi (dBFS).",
     "Live is off": "Live mati",
     "Waiting for signal…": "Menunggu sinyal…",
-    "Spectrum": "Spektrum",
-    "Only confirms that a tone is coming in.": "Hanya untuk memastikan nada masuk.",
+    "Octave bands (dB, calibrated)": "Pita oktaf (dB, terkalibrasi)",
+    "Octave bands (dBFS, raw)": "Pita oktaf (dBFS, mentah)",
+    "Level per 1-octave band, 125 Hz – 8 kHz.\n"
+    "Before calibration: raw dBFS. After calibration: calibrated dB "
+    "(raw + total correction of each band).\n"
+    "Dashed frame = band of the selected test frequency.\n"
+    "The strongest band lights up; it turns red when it is not the framed band.":
+        "Level per pita 1-oktaf, 125 Hz – 8 kHz.\n"
+        "Sebelum kalibrasi: dBFS mentah. Setelah kalibrasi: dB terkalibrasi "
+        "(mentah + koreksi total tiap pita).\n"
+        "Bingkai putus-putus = pita frekuensi uji yang dipilih.\n"
+        "Pita terkuat menyala; berubah merah jika bukan pita yang dibingkai.",
     "No input device found. Connect a microphone and press ↻.":
         "Perangkat input tidak ditemukan. Sambungkan mikrofon lalu tekan ↻.",
     "Select an input device first.": "Pilih perangkat input dulu.",
@@ -79,40 +89,54 @@ ID = {
     "Saved, but still missing: {fields}": "Tersimpan, tapi masih kosong: {fields}",
 
     # Calibration
-    "For each frequency: present a tone on the audiometer, read the true level on the reference "
-    "sound level meter, type it as Reference, then press Calibrate.":
-        "Untuk tiap frekuensi: bunyikan nada di audiometer, baca level sebenarnya di sound level "
-        "meter referensi, isi sebagai Referensi, lalu tekan Kalibrasi.",
-    "Calibrate one frequency": "Kalibrasi satu frekuensi",
+    "1. Put the acoustic calibrator on the microphone (1 kHz).\n"
+    "2. Enter the calibrator level (usually 94 dB or 114 dB) and press Calibrate.\n"
+    "3. If the microphone response is not flat, enter its correction per frequency "
+    "in the Calibration points table.":
+        "1. Pasang kalibrator akustik pada mikrofon (1 kHz).\n"
+        "2. Isi level kalibrator (biasanya 94 dB atau 114 dB) lalu tekan Kalibrasi.\n"
+        "3. Jika respon mikrofon tidak flat, isi koreksinya per frekuensi "
+        "di tabel Titik kalibrasi.",
+    "Reference calibration": "Kalibrasi referensi",
+    "Fixed: acoustic calibrators work at 1 kHz.": "Tetap: kalibrator akustik bekerja di 1 kHz.",
     "Frequency": "Frekuensi",
-    "Reference (dB)": "Referensi (dB)",
+    "Calibrator level (dB)": "Level kalibrator (dB)",
+    "e.g. 94 or 114": "mis. 94 atau 114",
+    "Use {level:g} dB": "Pakai {level:g} dB",
     "Measured (dB)": "Terukur (dB)",
     "Gain correction (dB)": "Koreksi gain (dB)",
-    "Gain correction = Reference − Measured.\n"
-    "It is added to every later reading at this frequency:\n"
-    "Corrected = Measured + Gain correction.\n"
-    "PASS when Corrected equals Reference ({res} dB resolution).":
-        "Koreksi gain = Referensi − Terukur.\n"
-        "Nilai ini ditambahkan ke setiap pembacaan berikutnya di frekuensi ini:\n"
-        "Terkoreksi = Terukur + Koreksi gain.\n"
-        "PASS jika Terkoreksi sama dengan Referensi (resolusi {res} dB).",
-    "from reference meter": "dari meter referensi",
+    "Gain correction = Calibrator level − Measured.\n"
+    "PASS when Measured + Gain correction equals the calibrator level ({res} dB resolution).":
+        "Koreksi gain = Level kalibrator − Terukur.\n"
+        "PASS jika Terukur + Koreksi gain sama dengan level kalibrator (resolusi {res} dB).",
     "start live signal": "mulai sinyal live",
     "type measured dB": "ketik dB terukur",
     "Enter manually": "Isi manual",
     "Calibrate": "Kalibrasi",
     "Calibration points": "Titik kalibrasi",
+    "Microphone frequency-response correction, in dB relative to 1 kHz.\n"
+    "Take it from the microphone's calibration certificate. Leave 0.00 if the response is flat.\n"
+    "Example: the microphone reads 1.5 dB too low at 8000 Hz → enter +1.5.\n"
+    "Total correction = Gain correction + Response correction.":
+        "Koreksi respon frekuensi mikrofon, dalam dB relatif terhadap 1 kHz.\n"
+        "Ambil dari sertifikat kalibrasi mikrofon. Biarkan 0.00 jika responnya flat.\n"
+        "Contoh: mikrofon membaca 1.5 dB terlalu rendah di 8000 Hz → isi +1.5.\n"
+        "Koreksi total = Koreksi gain + Koreksi respon.",
+    "Double-click a value to edit it.": "Klik dua kali nilai untuk mengubahnya.",
+    "Double-click to edit": "Klik dua kali untuk mengubah",
     "Frequency (Hz)": "Frekuensi (Hz)",
-    "Gain Correction (dB)": "Koreksi Gain (dB)",
-    "Corrected (dB)": "Terkoreksi (dB)",
+    "Response correction (dB)": "Koreksi respon (dB)",
+    "Total correction (dB)": "Koreksi total (dB)",
+    "reference": "referensi",
     "Status": "Status",
-    "Recalibrate": "Kalibrasi Ulang",
     "Delete": "Hapus",
     "Live is off: press Start Live, or tick “Enter manually”.":
         "Live mati: tekan Mulai Live, atau centang “Isi manual”.",
-    "Reference missing": "Referensi kosong",
-    "Enter the level read from the reference sound level meter.":
-        "Isi level yang terbaca di sound level meter referensi.",
+    "Calibrator level missing": "Level kalibrator kosong",
+    "Enter the calibrator level, e.g. 94 dB or 114 dB.": "Isi level kalibrator, mis. 94 dB atau 114 dB.",
+    "Invalid value": "Nilai tidak valid",
+    "Enter a number in dB between −30 and +30, e.g. 1.5 or -0.8.":
+        "Isi angka dalam dB antara −30 dan +30, mis. 1.5 atau -0.8.",
     "Measured level missing": "Level terukur kosong",
     "Start Live (left panel), or tick “Enter manually” and type it.":
         "Mulai Live (panel kiri), atau centang “Isi manual” lalu ketik nilainya.",
@@ -129,9 +153,10 @@ ID = {
     "Delete calibration": "Hapus kalibrasi",
     "Delete the calibration for {freq} Hz?": "Hapus kalibrasi untuk {freq} Hz?",
     "NOT CALIBRATED": "BELUM DIKALIBRASI",
-    "Calibrated at {time}": "Dikalibrasi {time}",
-    "Not calibrated yet: {list}": "Belum dikalibrasi: {list}",
-    "All frequencies calibrated.": "Semua frekuensi sudah dikalibrasi.",
+    "Not calibrated yet. Calibrate at 1 kHz with the calibrator.":
+        "Belum dikalibrasi. Lakukan kalibrasi di 1 kHz dengan kalibrator.",
+    "{ref:.2f} dB calibrator · measured {meas:.2f} dB · gain correction {gain:+.2f} dB · {time}":
+        "kalibrator {ref:.2f} dB · terukur {meas:.2f} dB · koreksi gain {gain:+.2f} dB · {time}",
 
     # Measurement
     "Set the audiometer to the chosen frequency and level, present the tone, check the result "
@@ -142,7 +167,6 @@ ID = {
         "Menyimpan frekuensi + level yang sama akan mengganti hasil lama.",
     "Test point": "Titik uji",
     "Level": "Level",
-    "Gain correction": "Koreksi gain",
     "Save Result": "Simpan Hasil",
     "Live result": "Hasil live",
     "Saved results": "Hasil tersimpan",
@@ -157,13 +181,10 @@ ID = {
     "Overall": "Keseluruhan",
     "Details": "Detail",
     "Retake": "Ukur Ulang",
-    "{freq} Hz is not calibrated yet. Calibrate it first.":
-        "{freq} Hz belum dikalibrasi. Kalibrasi dulu.",
     "Already saved. Saving again replaces it.": "Sudah tersimpan. Menyimpan lagi akan menggantinya.",
     "Live is off: press Start Live.": "Live mati: tekan Mulai Live.",
     "Not calibrated": "Belum dikalibrasi",
-    "{freq} Hz is not calibrated yet. Go to Calibration now?":
-        "{freq} Hz belum dikalibrasi. Buka tab Kalibrasi sekarang?",
+    "Not calibrated yet. Go to Calibration now?": "Belum dikalibrasi. Buka tab Kalibrasi sekarang?",
     "No live reading": "Belum ada pembacaan live",
     "Start Live (left panel) and present the tone before saving.":
         "Mulai Live (panel kiri) dan bunyikan nada sebelum menyimpan.",
@@ -180,8 +201,8 @@ ID = {
     "Result": "Hasil",
     "Criterion": "Kriteria",
     "Close": "Tutup",
-    "{raw:.2f} dB (raw) {corr:+.2f} dB (gain correction) = {cal:.2f} dB  ·  saved {time}":
-        "{raw:.2f} dB (mentah) {corr:+.2f} dB (koreksi gain) = {cal:.2f} dB  ·  disimpan {time}",
+    "{raw:.2f} dB (raw) {corr:+.2f} dB (total correction) = {cal:.2f} dB  ·  saved {time}":
+        "{raw:.2f} dB (mentah) {corr:+.2f} dB (koreksi total) = {cal:.2f} dB  ·  disimpan {time}",
 
     # Report
     "Measured": "Terukur",
@@ -196,8 +217,11 @@ ID = {
     "Export CSV": "Ekspor CSV",
     "Export Excel": "Ekspor Excel",
     "New Calibration": "Kalibrasi Baru",
-    "Delete all calibration points and measurement results":
-        "Hapus semua titik kalibrasi dan hasil pengukuran",
+    "Delete the calibration and all measurement results":
+        "Hapus kalibrasi dan semua hasil pengukuran",
+    "Report date": "Tanggal laporan",
+    "Date printed at the signature and used in the file name":
+        "Tanggal yang dicetak di bagian tanda tangan dan dipakai di nama file",
     "Not measured": "Belum diukur",
     "{freq} Hz / {level:.0f} dB has no result yet. Measure it now?":
         "{freq} Hz / {level:.0f} dB belum ada hasil. Ukur sekarang?",
@@ -211,15 +235,34 @@ ID = {
     "Could not write the file:": "Gagal menulis file:",
     "Exported": "Berhasil diekspor",
     "Saved to:": "Disimpan di:",
-    "This deletes ALL calibration points and measurement results.\n"
-    "Device information is kept. Export the report first if you need it.\n\nContinue?":
-        "Ini menghapus SEMUA titik kalibrasi dan hasil pengukuran.\n"
-        "Informasi alat tetap disimpan. Ekspor laporan dulu jika masih diperlukan.\n\nLanjutkan?",
+    "This deletes the calibration and ALL measurement results.\n"
+    "Device information and microphone response corrections are kept.\n"
+    "Export the report or save the session first if you need it.\n\nContinue?":
+        "Ini menghapus kalibrasi dan SEMUA hasil pengukuran.\n"
+        "Informasi alat dan koreksi respon mikrofon tetap disimpan.\n"
+        "Ekspor laporan atau simpan sesi dulu jika masih diperlukan.\n\nLanjutkan?",
+
+    # Session files
+    "Load Session": "Muat Sesi",
+    "Save Session": "Simpan Sesi",
+    "AudiCalPro session": "Sesi AudiCalPro",
+    "Continue a session saved earlier (*{ext})": "Lanjutkan sesi yang disimpan sebelumnya (*{ext})",
+    "Save all current work to a file to continue later (*{ext})":
+        "Simpan semua pekerjaan ke file untuk dilanjutkan nanti (*{ext})",
+    "Loading a session replaces the current device info, calibration and results.\n"
+    "Save the current session first if you still need it.\n\nContinue?":
+        "Memuat sesi akan mengganti info alat, kalibrasi, dan hasil yang sekarang.\n"
+        "Simpan sesi yang sekarang dulu jika masih diperlukan.\n\nLanjutkan?",
+    "Session saved": "Sesi tersimpan",
+    "Save failed": "Gagal menyimpan",
+    "Cannot load session": "Sesi tidak bisa dimuat",
+    "Session loaded": "Sesi dimuat",
+    "Session saved at {time} is loaded.": "Sesi yang disimpan pada {time} sudah dimuat.",
 
     # Report warnings
     "all levels": "semua level",
     "Device information incomplete: {fields}": "Informasi alat belum lengkap: {fields}",
-    "Not calibrated: {list}": "Belum dikalibrasi: {list}",
+    "Not calibrated: no 1 kHz calibrator measurement": "Belum dikalibrasi: belum ada pengukuran kalibrator 1 kHz",
     "{missing} of {planned} test points not measured — {list}":
         "{missing} dari {planned} titik uji belum diukur — {list}",
     "{n} test point(s) FAIL — retake them or note the reason":

@@ -112,7 +112,7 @@ class ResultDetailDialog(QDialog):
         fill_parameter_table(table, result)
         root.addWidget(table)
 
-        info = QLabel(tr("{raw:.2f} dB (raw) {corr:+.2f} dB (gain correction) = {cal:.2f} dB  ·  saved {time}").format(
+        info = QLabel(tr("{raw:.2f} dB (raw) {corr:+.2f} dB (total correction) = {cal:.2f} dB  ·  saved {time}").format(
             raw=result["measured_db"],
             corr=result["gain_correction_db"],
             cal=result["calibrated_db"],

@@ -35,7 +35,7 @@ def status_value_item(value, text, status):
 
 class MeasurementPage(QWidget):
     results_changed = pyqtSignal()
-    go_to_calibration = pyqtSignal(int)
+    go_to_calibration = pyqtSignal()
 
     SORT_KEYS = [
         lambda r: (r["frequency"], r["level_db"]),
@@ -94,21 +94,16 @@ class MeasurementPage(QWidget):
             self.level_combo.addItem(f"{level} dB", float(level))
         self.level_combo.currentIndexChanged.connect(self.on_point_changed)
 
-        self.correction_value = QLabel("--")
-        self.correction_value.setObjectName("reading")
-
         self.save_button = QPushButton(tr("Save Result"))
         self.save_button.setObjectName("primary")
         self.save_button.clicked.connect(self.save_result)
 
         grid.addWidget(QLabel(tr("Frequency")), 0, 0)
         grid.addWidget(QLabel(tr("Level")), 0, 1)
-        grid.addWidget(QLabel(tr("Gain correction")), 0, 2)
         grid.addWidget(self.frequency_combo, 1, 0)
         grid.addWidget(self.level_combo, 1, 1)
-        grid.addWidget(self.correction_value, 1, 2)
-        grid.addWidget(self.save_button, 1, 3)
-        for col in range(3):
+        grid.addWidget(self.save_button, 1, 2)
+        for col in range(2):
             grid.setColumnStretch(col, 1)
         root.addWidget(group)
 
@@ -201,11 +196,9 @@ class MeasurementPage(QWidget):
         correction = self.engine.get_correction(frequency)
 
         if correction is None:
-            self.correction_value.setText("—")
             banner(self.point_banner, "error",
-                   tr("{freq} Hz is not calibrated yet. Calibrate it first.").format(freq=frequency))
+                   tr("Not calibrated yet. Calibrate at 1 kHz with the calibrator."))
         else:
-            self.correction_value.setText(f"{correction:+.2f} dB")
             if self.engine.has_result(frequency, level_db):
                 banner(self.point_banner, "warn",
                        tr("Already saved. Saving again replaces it."))
@@ -249,10 +242,10 @@ class MeasurementPage(QWidget):
         if self.engine.get_correction(frequency) is None:
             answer = QMessageBox.question(
                 self, tr("Not calibrated"),
-                tr("{freq} Hz is not calibrated yet. Go to Calibration now?").format(freq=frequency)
+                tr("Not calibrated yet. Go to Calibration now?")
             )
             if answer == QMessageBox.StandardButton.Yes:
-                self.go_to_calibration.emit(frequency)
+                self.go_to_calibration.emit()
             return
 
         if not self.live.is_live() or self.preview is None:

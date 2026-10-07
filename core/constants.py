@@ -21,6 +21,12 @@ TEST_LEVELS_DB = [
     100
 ]
 
+# Calibration is done once at the reference frequency with an acoustic calibrator
+# (typically 94 dB or 114 dB SPL at 1 kHz). Other frequencies use that gain plus a
+# manually entered microphone frequency-response correction relative to 1 kHz.
+REFERENCE_FREQUENCY = 1000
+CALIBRATOR_LEVELS_DB = [94.0, 114.0]
+
 DEFAULT_SAMPLE_RATE = 48000
 DEFAULT_BLOCK_SIZE = 4096
 

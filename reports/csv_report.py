@@ -3,6 +3,7 @@ import csv
 from core.constants import (
     IEC_FREQUENCIES,
     TEST_LEVELS_DB,
+    REFERENCE_FREQUENCY,
     FREQUENCY_TOLERANCE_PCT,
     LEVEL_RESOLUTION_DB,
     THD_MAX_PCT
@@ -15,17 +16,24 @@ DEVICE_LABELS = [
     ("serial_number", "Serial number"),
     ("calibration_date", "Calibration date"),
     ("technician", "Technician"),
-    ("notes", "Notes")
+    ("notes", "Notes"),
+    ("report_date", "Report date")
 ]
 
 CALIBRATION_HEADER = [
     "Frequency (Hz)",
     "Measured (dB)",
-    "Reference (dB)",
-    "Gain Correction (dB) = Reference - Measured",
+    "Calibrator level (dB)",
+    "Gain Correction (dB) = Calibrator - Measured",
     "Corrected (dB) = Measured + Gain Correction",
     "Status",
     "Calibrated at"
+]
+
+RESPONSE_HEADER = [
+    "Frequency (Hz)",
+    "Response correction (dB re 1 kHz)",
+    "Total correction (dB) = Gain + Response"
 ]
 
 RESULT_HEADER = [
@@ -34,7 +42,7 @@ RESULT_HEADER = [
     "Frequency Status",
     "Level (dB)",
     "Raw Level (dB)",
-    "Gain Correction (dB)",
+    "Total Correction (dB)",
     "Calibrated Level (dB)",
     "Level Status",
     "THD (%)",
@@ -55,28 +63,36 @@ def report_rows(data):
 
     rows.append(["CRITERIA"])
     rows.append(["Frequency", f"within +/- {FREQUENCY_TOLERANCE_PCT:g} % of nominal"])
-    rows.append(["Calibration", f"corrected level equals reference ({LEVEL_RESOLUTION_DB:g} dB resolution)"])
+    rows.append(["Calibration", f"corrected level equals calibrator level ({LEVEL_RESOLUTION_DB:g} dB resolution)"])
     rows.append(["Level", level_tolerance_text()])
     rows.append(["THD", f"<= {THD_MAX_PCT:g} %"])
     rows.append([])
 
-    rows.append(["CALIBRATION (GAIN CORRECTION PER FREQUENCY)"])
+    rows.append([f"REFERENCE CALIBRATION ({REFERENCE_FREQUENCY} Hz, ACOUSTIC CALIBRATOR)"])
     rows.append(CALIBRATION_HEADER)
-    points = {p["frequency"]: p for p in data["calibration_points"]}
-    for f in IEC_FREQUENCIES:
-        p = points.get(f)
-        if p is None:
-            rows.append([f, "", "", "", "", "NOT CALIBRATED", ""])
-        else:
-            rows.append([
-                f,
-                f"{p['measured_db']:.2f}",
-                f"{p['reference_db']:.2f}",
-                f"{p['gain_correction_db']:+.2f}",
-                f"{p['corrected_db']:.2f}",
-                p["status"],
-                p["timestamp"]
-            ])
+    p = data["reference_point"]
+    if p is None:
+        rows.append([REFERENCE_FREQUENCY, "", "", "", "", "NOT CALIBRATED", ""])
+    else:
+        rows.append([
+            REFERENCE_FREQUENCY,
+            f"{p['measured_db']:.2f}",
+            f"{p['reference_db']:.2f}",
+            f"{p['gain_correction_db']:+.2f}",
+            f"{p['corrected_db']:.2f}",
+            p["status"],
+            p["timestamp"]
+        ])
+    rows.append([])
+
+    rows.append(["CALIBRATION POINTS (MICROPHONE RESPONSE CORRECTION RELATIVE TO 1 kHz)"])
+    rows.append(RESPONSE_HEADER)
+    for r in data["response"]:
+        rows.append([
+            r["frequency"],
+            f"{r['response_db']:+.2f}",
+            "" if r["total_db"] is None else f"{r['total_db']:+.2f}"
+        ])
     rows.append([])
 
     # Every planned point is listed; missing ones are left blank so gaps are visible.

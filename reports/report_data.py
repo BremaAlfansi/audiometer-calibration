@@ -1,4 +1,5 @@
-from datetime import datetime
+import re
+from datetime import date, datetime
 
 from core.constants import IEC_FREQUENCIES, TEST_LEVELS_DB, LEVEL_TOLERANCE_DB
 
@@ -27,17 +28,57 @@ def missing_device_fields(info):
 
 
 def collect_report_data(engine):
-    points = engine.get_calibration_points()
+    point = engine.get_reference_point()
+    corrections = engine.get_response_corrections()
+    info = engine.database.get_device_info()
     return {
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "device_info": engine.database.get_device_info(),
-        "calibration_points": [points[f] for f in IEC_FREQUENCIES if f in points],
-        "uncalibrated": engine.uncalibrated_frequencies(),
+        "report_date": info["report_date"] or date.today().isoformat(),
+        "device_info": info,
+        "reference_point": point,
+        # Per-frequency corrections; total is None until the 1 kHz calibration exists.
+        "response": [
+            {
+                "frequency": f,
+                "response_db": corrections[f],
+                "total_db": None if point is None else point["gain_correction_db"] + corrections[f]
+            }
+            for f in IEC_FREQUENCIES
+        ],
         "results": engine.get_results(),
         "coverage": engine.coverage(),
         "missing": engine.missing_points(),
         "summary": engine.summary()
     }
+
+
+def file_slug(text):
+    """Make text safe for a file name: 'Interacoustics AD 629' -> 'Interacoustics-AD-629'."""
+    return re.sub(r"[^A-Za-z0-9.]+", "-", text).strip("-.")
+
+
+def report_file_name(engine, extension, kind="Report"):
+    """e.g. AudiometerCalibration_Report_Interacoustics-AD629_SN123_2026-10-07_PASS.pdf"""
+    info = engine.database.get_device_info()
+    summary = engine.summary()
+    if summary["missing"]:
+        result = "INCOMPLETE"
+    else:
+        result = summary["overall"]
+
+    serial = file_slug(info["serial_number"])
+    if serial and not serial.upper().startswith("SN"):
+        serial = "SN" + serial
+
+    parts = [
+        "AudiometerCalibration",
+        kind,
+        file_slug(f"{info['brand']} {info['model']}"),
+        serial,
+        info["report_date"] or date.today().isoformat(),
+        result if kind == "Report" else datetime.now().strftime("%H%M"),
+    ]
+    return "_".join(p for p in parts if p) + extension
 
 
 def _identity(text):
@@ -71,9 +112,8 @@ def report_warnings(data, tr=_identity):
         warnings.append(tr("Device information incomplete: {fields}").format(
             fields=", ".join(tr(f) for f in missing_fields)))
 
-    if data["uncalibrated"]:
-        warnings.append(tr("Not calibrated: {list}").format(
-            list=", ".join(f"{f} Hz" for f in data["uncalibrated"])))
+    if data["reference_point"] is None:
+        warnings.append(tr("Not calibrated: no 1 kHz calibrator measurement"))
 
     if data["missing"]:
         summary = data["summary"]

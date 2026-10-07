@@ -16,7 +16,8 @@ from ui.i18n import tr
 from ui import style
 from ui.style import banner, info_icon, s
 from ui.widgets.metric_card import MetricCard
-from ui.widgets.spectrum_widget import SpectrumWidget
+from ui.widgets.octave_band_widget import OctaveBandWidget
+from core.signal_analysis import OCTAVE_BAND_CENTRES
 
 
 class LivePanel(QWidget):
@@ -25,9 +26,10 @@ class LivePanel(QWidget):
     reading_updated = pyqtSignal(object)
     live_state_changed = pyqtSignal(bool)
 
-    def __init__(self):
+    def __init__(self, engine):
         super().__init__()
 
+        self.engine = engine
         self.audio = AudioEngine()
         self.analyzer = SignalAnalyzer()
 
@@ -35,9 +37,11 @@ class LivePanel(QWidget):
         self.timer.timeout.connect(self.live_measure)
 
         self.current_reading = None
+        self.band_corrections = None
 
         self.setup_ui()
         self.load_devices()
+        self.refresh_corrections()
 
     def setup_ui(self):
         self.setFixedWidth(300 if style.COMPACT else s(370))
@@ -83,13 +87,20 @@ class LivePanel(QWidget):
         banner(self.signal_banner, "warn", tr("Live is off"))
         root.addWidget(self.signal_banner)
 
-        spectrum_row = QHBoxLayout()
-        spectrum_row.addWidget(QLabel(tr("Spectrum")))
-        spectrum_row.addStretch(1)
-        spectrum_row.addWidget(info_icon(tr("Only confirms that a tone is coming in.")))
-        root.addLayout(spectrum_row)
-        self.spectrum = SpectrumWidget()
-        root.addWidget(self.spectrum)
+        bands_row = QHBoxLayout()
+        self.bands_title = QLabel()
+        bands_row.addWidget(self.bands_title)
+        bands_row.addStretch(1)
+        bands_row.addWidget(info_icon(tr(
+            "Level per 1-octave band, 125 Hz – 8 kHz.\n"
+            "Before calibration: raw dBFS. After calibration: calibrated dB "
+            "(raw + total correction of each band).\n"
+            "Dashed frame = band of the selected test frequency.\n"
+            "The strongest band lights up; it turns red when it is not the framed band."
+        )))
+        root.addLayout(bands_row)
+        self.octave_bands = OctaveBandWidget()
+        root.addWidget(self.octave_bands)
 
         root.addStretch(1)
 
@@ -146,7 +157,7 @@ class LivePanel(QWidget):
         self.freq_card.set_value(f"{result['frequency']:.1f} Hz")
         self.db_card.set_value(f"{result['db']:.1f} dB")
         self.thd_card.set_value(f"{result['thd']:.2f} %")
-        self.spectrum.update_plot(result["frequencies"], result["spectrum"])
+        self.octave_bands.update_bands(self.display_band_levels(result["octave_bands"]))
 
         if self.has_signal():
             banner(self.signal_banner, "ok", tr("Signal detected"))
@@ -154,6 +165,30 @@ class LivePanel(QWidget):
             banner(self.signal_banner, "warn", tr("No tone detected. Check the audiometer output."))
 
         self.reading_updated.emit(result)
+
+    # Octave-band display
+
+    def refresh_corrections(self):
+        """Re-read the calibration; call after it changes."""
+        if self.engine.is_calibrated():
+            self.band_corrections = {f: self.engine.get_correction(f) for f in OCTAVE_BAND_CENTRES}
+            self.octave_bands.set_scale("calibrated")
+            self.bands_title.setText(tr("Octave bands (dB, calibrated)"))
+        else:
+            self.band_corrections = None
+            self.octave_bands.set_scale("raw")
+            self.bands_title.setText(tr("Octave bands (dBFS, raw)"))
+
+        if self.current_reading is not None:
+            self.octave_bands.update_bands(self.display_band_levels(self.current_reading["octave_bands"]))
+
+    def display_band_levels(self, raw_levels):
+        if self.band_corrections is None:
+            return raw_levels
+        return {f: level + self.band_corrections[f] for f, level in raw_levels.items()}
+
+    def set_target_frequency(self, frequency):
+        self.octave_bands.set_target(frequency)
 
     def has_signal(self):
         r = self.current_reading

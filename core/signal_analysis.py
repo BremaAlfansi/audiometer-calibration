@@ -3,7 +3,10 @@ import numpy as np
 from scipy.signal import windows
 from scipy.fft import rfft, rfftfreq
 
-from core.constants import MIN_TONE_FREQUENCY_HZ
+from core.constants import MIN_TONE_FREQUENCY_HZ, IEC_FREQUENCIES
+
+# The audiometric test frequencies are exactly the standard octave-band centres.
+OCTAVE_BAND_CENTRES = IEC_FREQUENCIES
 
 
 class SignalAnalyzer:
@@ -30,16 +33,37 @@ class SignalAnalyzer:
 
         thd = self.calculate_thd(spectrum, peak_idx)
         noise = self.noise_floor(spectrum)
+        octave_bands = self.octave_band_levels(spectrum, frequencies, window)
 
+        # Plain Python floats: audio arrives as float32, and sqlite3 stores NumPy
+        # scalars as raw bytes instead of numbers.
         return {
-            "frequency": fundamental_freq,
-            "db": db,
-            "thd": thd,
-            "noise": noise,
-            "prominence_db": prominence_db,
+            "frequency": float(fundamental_freq),
+            "db": float(db),
+            "thd": float(thd),
+            "noise": float(noise),
+            "prominence_db": float(prominence_db),
+            "octave_bands": octave_bands,
             "frequencies": frequencies,
             "spectrum": spectrum
         }
+
+    @staticmethod
+    def octave_band_levels(spectrum, frequencies, window):
+        """Level per 1-octave band (dB, same scale as the raw level), centre -> dB.
+
+        A band spans fc/sqrt(2) .. fc*sqrt(2). Band power comes from the windowed
+        one-sided spectrum (Parseval), so a pure tone's band level equals its RMS level.
+        """
+        power_scale = 2.0 / (len(window) * np.sum(window ** 2))
+        power = spectrum ** 2 * power_scale
+
+        levels = {}
+        for centre in OCTAVE_BAND_CENTRES:
+            in_band = (frequencies >= centre / np.sqrt(2)) & (frequencies < centre * np.sqrt(2))
+            band_power = float(np.sum(power[in_band]))
+            levels[centre] = float(10 * np.log10(max(band_power, 1e-24)))
+        return levels
 
     @staticmethod
     def interpolated_peak(spectrum, frequencies, idx):

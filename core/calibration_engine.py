@@ -1,6 +1,7 @@
 from core.constants import (
     IEC_FREQUENCIES,
     TEST_LEVELS_DB,
+    REFERENCE_FREQUENCY,
     LEVEL_RESOLUTION_DB,
     LEVEL_TOLERANCE_DB,
     FREQUENCY_TOLERANCE_PCT,
@@ -32,7 +33,10 @@ class CalibrationEngine:
     def __init__(self, database=None):
         self.database = database or CalibrationDatabase()
 
-    # Step 2: calibration (one gain correction per frequency)
+    # Step 2: calibration
+    #   Gain at 1 kHz from the calibrator, plus a per-frequency microphone
+    #   response correction (dB relative to 1 kHz, entered manually).
+    #   Total correction(f) = gain correction + response correction(f).
 
     @staticmethod
     def with_corrected_level(point):
@@ -41,9 +45,9 @@ class CalibrationEngine:
         point["status"] = PASS if levels_match(point["corrected_db"], point["reference_db"]) else FAIL
         return point
 
-    def calibrate(self, frequency, measured_db, reference_db):
+    def calibrate(self, measured_db, reference_db):
         point = self.with_corrected_level({
-            "frequency": frequency,
+            "frequency": REFERENCE_FREQUENCY,
             "measured_db": measured_db,
             "reference_db": reference_db,
             "gain_correction_db": gain_correction(measured_db, reference_db)
@@ -51,23 +55,38 @@ class CalibrationEngine:
         self.database.upsert_calibration_point(point)
         return point
 
-    def get_calibration_points(self):
-        # Status is recomputed on read so points saved under an older rule are judged the same way.
+    def get_reference_point(self):
+        """The 1 kHz calibrator measurement, or None if not calibrated yet."""
+        for p in self.database.get_calibration_points():
+            if p["frequency"] == REFERENCE_FREQUENCY:
+                # Status is recomputed on read so points saved under an older rule are judged the same way.
+                return self.with_corrected_level(p)
+        return None
+
+    def is_calibrated(self):
+        return self.get_reference_point() is not None
+
+    def delete_reference_point(self):
+        self.database.delete_calibration_point(REFERENCE_FREQUENCY)
+
+    def get_response_corrections(self):
+        """Correction per frequency in dB relative to 1 kHz; 0.0 where none was entered."""
+        stored = self.database.get_response_corrections()
         return {
-            p["frequency"]: self.with_corrected_level(p)
-            for p in self.database.get_calibration_points()
+            f: 0.0 if f == REFERENCE_FREQUENCY else float(stored.get(f, 0.0))
+            for f in IEC_FREQUENCIES
         }
 
+    def set_response_correction(self, frequency, correction_db):
+        if frequency != REFERENCE_FREQUENCY:
+            self.database.set_response_correction(frequency, float(correction_db))
+
     def get_correction(self, frequency):
-        point = self.get_calibration_points().get(frequency)
-        return None if point is None else point["gain_correction_db"]
-
-    def delete_calibration_point(self, frequency):
-        self.database.delete_calibration_point(frequency)
-
-    def uncalibrated_frequencies(self):
-        points = self.get_calibration_points()
-        return [f for f in IEC_FREQUENCIES if f not in points]
+        """Total correction added to raw readings at this frequency, or None if not calibrated."""
+        point = self.get_reference_point()
+        if point is None:
+            return None
+        return point["gain_correction_db"] + self.get_response_corrections()[frequency]
 
     # Step 3: verification (per-parameter pass/fail)
 
@@ -82,6 +101,7 @@ class CalibrationEngine:
         return deviation <= LEVEL_TOLERANCE_DB[frequency] + 1e-9
 
     def evaluate(self, frequency, level_db, reading, correction_db):
+        reading = {key: float(reading[key]) for key in ("frequency", "db", "thd")}
         calibrated_db = reading["db"] + correction_db
 
         frequency_status = PASS if self.frequency_ok(frequency, reading["frequency"]) else FAIL
@@ -147,5 +167,6 @@ class CalibrationEngine:
         }
 
     def clear_all(self):
+        """Start over. Microphone response corrections are kept: they belong to the microphone."""
         self.database.clear_calibration_points()
         self.database.clear_verification_results()
